@@ -175,7 +175,6 @@ IS_TOUCH_DEVICE = Services.UserInput.TouchEnabled and not Services.UserInput.Key
 do
     local v0 = cam.ViewportSize
     local minDim0 = (v0 and v0.X > 0 and v0.Y > 0) and math.min(v0.X, v0.Y) or 400
-    -- Lower threshold: phones typically have minDim < 500 in portrait mode
     IS_MOBILE = IS_TOUCH_DEVICE and minDim0 < 700
 end
 IS_TOUCH_ONLY = Services.UserInput.TouchEnabled
@@ -584,8 +583,6 @@ function updateGlobalScale()
     local vps = getViewport()
     local minDim = math.min(vps.X, vps.Y)
     local s
-    -- On mobile, scale DOWN so elements fit small screens.
-    -- Reference: a 360px-wide phone should use ~0.75x, a 414px phone ~0.82x.
     if IS_MOBILE then s = math.clamp(minDim / 500, 0.65, 0.95)
     else s = math.clamp(minDim / 800, 1.0, 1.3) end
     uiScale.Scale = s
@@ -620,7 +617,6 @@ local toastCount = 0
 function showToast(text, bgColor)
     toastCount = toastCount + 1
     local toast = Instance.new("TextLabel", toastGui)
-    -- Use relative width on mobile so toast never overflows screen
     toast.Size = IS_MOBILE and UDim2.new(0.88, 0, 0, 40) or UDim2.new(0, 300, 0, 40)
     toast.BackgroundColor3 = bgColor or colorInfo
     toast.BackgroundTransparency = 0.1
@@ -1092,13 +1088,10 @@ trackInst(SelectionOutline)
 
 infoPanel = Instance.new("Frame", MainUI)
 infoPanel.Name = "InfoPanel"
--- On mobile: keep the panel narrower so it fits on a phone screen
-local infoW = IS_MOBILE and math.clamp(getViewport().X * 0.88, 220, 270) or 250
-local infoH = IS_MOBILE and math.clamp(getViewport().Y * 0.50, 260, 380) or 360
-infoH = math.max(infoH, 260)
+local infoW = IS_MOBILE and math.clamp(getViewport().X * 0.92, 260, 340) or 300
+local infoH = IS_MOBILE and math.clamp(getViewport().Y * 0.85, 480, 700) or 520
 infoW, infoH = clampPanelSize(infoW, infoH)
 infoPanel.Size = UDim2.fromOffset(infoW, infoH)
--- Start off-screen to the right; togglePanel will slide it in
 infoPanel.Position = UDim2.new(1, infoW + 20, 0.5, 0)
 infoPanel.AnchorPoint = Vector2.new(1, 0.5)
 infoPanel.BackgroundColor3 = Color3.fromHex("FF8E8E")
@@ -1109,7 +1102,7 @@ infoStroke.Color=colorBordeEspecial; infoStroke.Thickness=2; infoStroke.ApplyStr
 
 editorToggleBtn = Instance.new("TextButton",infoPanel)
 editorToggleBtn.Name = "EditorToggle"
-editorToggleBtn.Size = UDim2.fromOffset(IS_MOBILE and 28 or 25, IS_MOBILE and 48 or 40)
+editorToggleBtn.Size = UDim2.fromOffset(IS_MOBILE and 28 or 25, IS_MOBILE and 60 or 50)
 editorToggleBtn.Position = UDim2.new(0, IS_MOBILE and -33 or -30, 0.5, 0)
 editorToggleBtn.AnchorPoint = Vector2.new(0,0.5)
 editorToggleBtn.BackgroundColor3 = toolColors.settingsBG
@@ -1119,29 +1112,64 @@ editorToggleBtn.Font = Enum.Font.GothamBold
 editorToggleBtn.TextSize = IS_MOBILE and 18 or 18
 Instance.new("UICorner",editorToggleBtn).CornerRadius = UDim.new(0,8)
 
-innerPanel = Instance.new("Frame",infoPanel)
-innerPanel.Size = UDim2.new(0.9,0,0,84)
-innerPanel.Position = UDim2.new(0.05,0,0,34)
+-- CONTENEDOR CON LISTA PARA EVITAR SUPERPOSICIONES
+local infoContent = Instance.new("Frame", infoPanel)
+infoContent.Name = "Content"
+infoContent.Size = UDim2.new(1, 0, 1, 0)
+infoContent.BackgroundTransparency = 1
+local infoPad = Instance.new("UIPadding", infoContent)
+infoPad.PaddingTop = UDim.new(0, 8)
+infoPad.PaddingBottom = UDim.new(0, 8)
+infoPad.PaddingLeft = UDim.new(0, 8)
+infoPad.PaddingRight = UDim.new(0, 8)
+
+local infoLayout = Instance.new("UIListLayout", infoContent)
+infoLayout.Padding = UDim.new(0, 8)
+infoLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+infoLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+titleLab = Instance.new("TextLabel",infoContent)
+titleLab.LayoutOrder = 1
+titleLab.Size=UDim2.new(1,0,0,24)
+titleLab.Text="object editor"; titleLab.Font=Enum.Font.GothamBold; titleLab.TextSize=IS_MOBILE and 15 or 13
+titleLab.TextColor3=TEXT_COLOR; titleLab.BackgroundTransparency=1
+
+innerPanel = Instance.new("Frame",infoContent)
+innerPanel.LayoutOrder = 2
+innerPanel.Size = UDim2.new(1,0,0,IS_MOBILE and 160 or 180)
 innerPanel.BackgroundColor3 = colorRow
 innerPanel.BorderSizePixel = 0
 innerPanel.ClipsDescendants = true
 Instance.new("UICorner",innerPanel).CornerRadius = UDim.new(0,12)
 
+local noPreviewLabel = Instance.new("TextLabel", innerPanel)
+noPreviewLabel.Name = "NoPreviewLabel"
+noPreviewLabel.Size = UDim2.new(1,0,1,0)
+noPreviewLabel.BackgroundTransparency = 1
+noPreviewLabel.Text = "select a block to preview"
+noPreviewLabel.TextColor3 = Color3.fromHex("E07273")
+noPreviewLabel.Font = Enum.Font.GothamBold
+noPreviewLabel.TextSize = IS_MOBILE and 14 or 12
+noPreviewLabel.ZIndex = 1
+
 viewFrame = Instance.new("ViewportFrame",innerPanel)
 viewFrame.Size = UDim2.new(1,0,1,0)
 viewFrame.BackgroundTransparency = 1
+viewFrame.ZIndex = 2
 viewCam = Instance.new("Camera")
 viewFrame.CurrentCamera = viewCam
 
-dataContainer = Instance.new("Frame",infoPanel)
-dataContainer.Size = UDim2.new(0.9,0,0,114)
-dataContainer.Position = UDim2.new(0.05,0,0,126)
+dataContainer = Instance.new("Frame",infoContent)
+dataContainer.LayoutOrder = 3
+dataContainer.Size = UDim2.new(1,0,0,IS_MOBILE and 130 or 110)
 dataContainer.BackgroundTransparency = 1
-Instance.new("UIListLayout",dataContainer).Padding = UDim.new(0,4)
+local dcLayout = Instance.new("UIListLayout",dataContainer)
+dcLayout.Padding = UDim.new(0,4)
+dcLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 function createManualInput(labelName, parent)
     local cont = Instance.new("Frame",parent)
-    cont.Size = UDim2.new(1,0,0,IS_MOBILE and 34 or 30)
+    cont.Size = UDim2.new(1,0,0,IS_MOBILE and 38 or 32)
     cont.BackgroundColor3 = colorRow; cont.BorderSizePixel=0
     Instance.new("UICorner",cont).CornerRadius = UDim.new(0,8)
     local lab = Instance.new("TextLabel",cont)
@@ -1156,21 +1184,15 @@ function createManualInput(labelName, parent)
     return ibox
 end
 
-titleLab = Instance.new("TextLabel",infoPanel)
-titleLab.Size=UDim2.new(0.9,0,0,22); titleLab.Position=UDim2.new(0.05,0,0,8)
-titleLab.Text="object editor"; titleLab.Font=Enum.Font.GothamBold; titleLab.TextSize=IS_MOBILE and 14 or 13
-titleLab.TextColor3=TEXT_COLOR; titleLab.BackgroundTransparency=1
-
 inPos = createManualInput("position", dataContainer)
 inSize = createManualInput("size", dataContainer)
 inRot = createManualInput("rotation", dataContainer)
 
-local topToolRow = Instance.new("Frame", infoPanel)
+local topToolRow = Instance.new("Frame", infoContent)
 topToolRow.Name = "TopToolRow"
+topToolRow.LayoutOrder = 4
 local ttRowH = IS_MOBILE and 44 or 38
-topToolRow.Size = UDim2.new(1,-10, 0, ttRowH)
-topToolRow.Position = UDim2.new(0,5, 1, -(ttRowH*2 + 12))
-topToolRow.AnchorPoint = Vector2.new(0,1)
+topToolRow.Size = UDim2.new(1, 0, 0, ttRowH)
 topToolRow.BackgroundTransparency = 1
 local ttLayout = Instance.new("UIListLayout", topToolRow)
 ttLayout.FillDirection = Enum.FillDirection.Horizontal
@@ -1180,7 +1202,7 @@ ttLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 local function createTopToolBtn(imgId, labelTxt)
     local sz = ttRowH
     local wrap = Instance.new("Frame", topToolRow)
-    wrap.Size = UDim2.fromOffset(math.floor((infoW-10-4)/2), sz)
+    wrap.Size = UDim2.new(0.5, -2, 1, 0)
     wrap.BackgroundColor3 = toolColors.cards; wrap.BorderSizePixel=0
     Instance.new("UICorner", wrap).CornerRadius = UDim.new(0,10)
     local img = Instance.new("ImageLabel", wrap)
@@ -1199,17 +1221,16 @@ end
 archEditorBtn, archEditorWrap  = createTopToolBtn(iconIds.arch, "arch")
 boxSelectEditorBtn, boxSelectEditorWrap = createTopToolBtn(iconIds.boxselect, "box sel")
 
-historyCont = Instance.new("Frame",infoPanel)
-historyCont.Size = UDim2.new(1,-10,0,44)
-historyCont.Position = UDim2.new(0,5,1,-5)
-historyCont.AnchorPoint = Vector2.new(0,1)
+historyCont = Instance.new("Frame",infoContent)
+historyCont.LayoutOrder = 5
+historyCont.Size = UDim2.new(1,0,0,44)
 historyCont.BackgroundTransparency = 1
 hLayout = Instance.new("UIListLayout",historyCont)
 hLayout.FillDirection=Enum.FillDirection.Horizontal; hLayout.Padding=UDim.new(0,4)
 hLayout.HorizontalAlignment=Enum.HorizontalAlignment.Center
 
 function createHistoryBtn(imgId)
-    local sz = math.clamp(math.floor((infoW-10-20)/6),30,44)
+    local sz = math.clamp(math.floor((infoW-40)/6),28,44)
     local btn = Instance.new("ImageButton",historyCont)
     btn.Size=UDim2.fromOffset(sz,sz); btn.BackgroundColor3=toolColors.cards
     btn.BackgroundTransparency=0; btn.Image="rbxassetid://"..imgId; btn.ScaleType=Enum.ScaleType.Fit
@@ -1241,7 +1262,6 @@ negateStroke.Color=colorBordeEspecial; negateStroke.Thickness=3
 negateCloseBtn = Instance.new("ImageButton",negateMenu)
 negateCloseBtn.Name = "CloseNegate"
 negateCloseBtn.Size = UDim2.fromOffset(IS_MOBILE and 36 or 30, IS_MOBILE and 36 or 30)
--- Positioned inside the top-right corner of the panel
 negateCloseBtn.Position = UDim2.new(1, IS_MOBILE and -42 or -36, 0, IS_MOBILE and 6 or 5)
 negateCloseBtn.AnchorPoint = Vector2.new(0,0)
 negateCloseBtn.BackgroundColor3 = toolColors.cards
@@ -1898,6 +1918,8 @@ redoBtn.MouseButton1Click:Connect(doRedo)
 
 previewObject=nil
 function updatePanel()
+    local ph = innerPanel:FindFirstChild("NoPreviewLabel")
+    if ph then ph.Visible = (not targetPart) end
     if not targetPart then
         if not inPos:IsFocused() then inPos.Text="" end
         if not inRot:IsFocused() then inRot.Text="" end
@@ -1911,7 +1933,7 @@ function updatePanel()
     if not inSize:IsFocused() then inSize.Text=string.format("%.2f, %.2f, %.2f",size.X,size.Y,size.Z) end
     if previewObject then previewObject:Destroy() end; viewFrame:ClearAllChildren(); previewObject=targetPart:Clone()
     if previewObject:IsA("Model") then previewObject:PivotTo(CFrame.new(0,0,0)) else previewObject.CFrame=CFrame.new(0,0,0) end
-    previewObject.Parent=viewFrame; local bSize=getObjSize(previewObject); local dist=bSize.Magnitude*1.3; viewCam.CFrame=CFrame.new(Vector3.new(dist,dist,dist),Vector3.new(0,0,0))
+    previewObject.Parent=viewFrame; local bSize=getObjSize(previewObject); local dist=bSize.Magnitude*1.15; viewCam.CFrame=CFrame.new(Vector3.new(dist,dist,dist),Vector3.new(0,0,0))
 end
 
 function applyManual()
@@ -1984,9 +2006,7 @@ function applyToolbarLayout()
     local lift=getBarLift(); local pad=IS_MOBILE and 5 or 8
     local btnSize,barW,barH
     if toolbarEdge=="bottom" or toolbarEdge=="top" then
-        -- Reserve space for all buttons + padding, capped to screen width
         local maxW = math.min(vps.X - margin*2, IS_MOBILE and vps.X*0.96 or math.clamp(vps.X*0.85,320,600))
-        -- Compute btnSize so all 6 buttons fit, respecting MIN_TOUCH floor
         btnSize = math.floor((maxW - pad*(btnCount+1)) / btnCount)
         btnSize = math.clamp(btnSize, MIN_TOUCH, IS_MOBILE and 56 or 64)
         barW = btnSize*btnCount + pad*(btnCount+1)
@@ -2118,7 +2138,6 @@ boxSelectLabel = Instance.new("TextLabel", MainUI)
 boxSelectLabel.Name = "BoxSelectLabel"
 boxSelectLabel.Size = UDim2.fromOffset(IS_MOBILE and 200 or 180, IS_MOBILE and 34 or 30)
 boxSelectLabel.AnchorPoint = Vector2.new(0.5, 0)
--- On mobile push it down a bit more to avoid system notch/status bar overlap
 boxSelectLabel.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 24 or 10)
 boxSelectLabel.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
 boxSelectLabel.BackgroundTransparency = 0.15
@@ -2173,13 +2192,11 @@ local function updateLiveBoxSelect()
 
     local buildModel = workspace:FindFirstChild("BuildModel") or workspace
     
-    -- Use GetDescendants to catch blocks nested in folders/models
     for _, obj in ipairs(buildModel:GetDescendants()) do
         if obj:IsA("Model") or obj:IsA("BasePart") then
             local isSelectable = true
             if obj:FindFirstChildOfClass("Humanoid") then isSelectable = false end
             if obj.Name == "Baseplate" or obj:IsA("Terrain") then isSelectable = false end
-            -- Filter out inner parts (MouseFilterPart, base, ColorPart inside a Model)
             if obj:IsA("BasePart") and obj.Name == "MouseFilterPart" then isSelectable = false end
             if obj:IsA("BasePart") and obj.Name == "base" then isSelectable = false end
             if obj:IsA("BasePart") and obj.Parent and obj.Parent:IsA("Model") and obj.Parent:FindFirstChild("ColorPart") then
@@ -2341,7 +2358,6 @@ settingsStroke=Instance.new("UIStroke",settingsFrame); settingsStroke.Color=colo
 
 function updateSettingsSize()
     local vps=getViewport(); local w,h
-    -- On mobile: cap to 96% of screen width but never more than 380px
     if IS_MOBILE then w=math.min(380, vps.X*0.96); h=math.min(680, vps.Y*0.92)
     else w=math.min(480,vps.X*0.94); h=math.min(600,vps.Y*0.9) end
     w,h=clampPanelSize(w,h); settingsFrame.Size=UDim2.fromOffset(w,h)
@@ -2628,7 +2644,6 @@ end)
 
 function createTool(iconId,callback)
     local b=Instance.new("ImageButton",toolBar)
-    -- Size is overridden by applyToolbarLayout; set a safe default here
     local sz=IS_MOBILE and 52 or 60
     b.Size=UDim2.fromOffset(sz,sz); b.BackgroundColor3=toolColors.cards; b.BackgroundTransparency=0
     b.AutoButtonColor=false; b.Image="rbxassetid://"..iconId
