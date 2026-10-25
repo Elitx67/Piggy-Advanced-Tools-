@@ -27,8 +27,8 @@ do
         dim.BackgroundTransparency = 0.45
         dim.BorderSizePixel = 0
 
-        local panelW = _isMobWarn and math.min(360, game.Workspace.CurrentCamera.ViewportSize.X * 0.92) or 380
-        local panelH = _isMobWarn and 430 or 390
+        local panelW = _isMobWarn and math.min(340, game.Workspace.CurrentCamera.ViewportSize.X * 0.92) or 380
+        local panelH = _isMobWarn and 400 or 390
         local panel = Instance.new("Frame", warnGui)
         panel.Name = "WarnPanel"
         panel.Size = UDim2.fromOffset(panelW, panelH)
@@ -175,13 +175,14 @@ IS_TOUCH_DEVICE = Services.UserInput.TouchEnabled and not Services.UserInput.Key
 do
     local v0 = cam.ViewportSize
     local minDim0 = (v0 and v0.X > 0 and v0.Y > 0) and math.min(v0.X, v0.Y) or 400
-    IS_MOBILE = IS_TOUCH_DEVICE and minDim0 < 600
+    -- Lower threshold: phones typically have minDim < 500 in portrait mode
+    IS_MOBILE = IS_TOUCH_DEVICE and minDim0 < 700
 end
 IS_TOUCH_ONLY = Services.UserInput.TouchEnabled
-MIN_TOUCH = IS_MOBILE and 56 or (IS_TOUCH_DEVICE and 48 or 44)
+MIN_TOUCH = IS_MOBILE and 48 or (IS_TOUCH_DEVICE and 44 or 40)
 
 local function getScreenMargin()
-    return IS_MOBILE and 8 or 12
+    return IS_MOBILE and 6 or 12
 end
 local function getViewport()
     local v = cam.ViewportSize
@@ -583,8 +584,10 @@ function updateGlobalScale()
     local vps = getViewport()
     local minDim = math.min(vps.X, vps.Y)
     local s
-    if IS_MOBILE then s = math.clamp(minDim/480, 0.9, 1.15)
-    else s = math.clamp(minDim/800, 1.0, 1.3) end
+    -- On mobile, scale DOWN so elements fit small screens.
+    -- Reference: a 360px-wide phone should use ~0.75x, a 414px phone ~0.82x.
+    if IS_MOBILE then s = math.clamp(minDim / 500, 0.65, 0.95)
+    else s = math.clamp(minDim / 800, 1.0, 1.3) end
     uiScale.Scale = s
     if topScale then topScale.Scale = s end
     if modalScale then modalScale.Scale = s end
@@ -617,7 +620,8 @@ local toastCount = 0
 function showToast(text, bgColor)
     toastCount = toastCount + 1
     local toast = Instance.new("TextLabel", toastGui)
-    toast.Size = UDim2.new(0, 300, 0, 40)
+    -- Use relative width on mobile so toast never overflows screen
+    toast.Size = IS_MOBILE and UDim2.new(0.88, 0, 0, 40) or UDim2.new(0, 300, 0, 40)
     toast.BackgroundColor3 = bgColor or colorInfo
     toast.BackgroundTransparency = 0.1
     toast.Text = "⚠ " .. text
@@ -1088,13 +1092,15 @@ trackInst(SelectionOutline)
 
 infoPanel = Instance.new("Frame", MainUI)
 infoPanel.Name = "InfoPanel"
-local infoW = IS_MOBILE and math.clamp(getViewport().X*0.45,250,290) or 250
-local infoH = IS_MOBILE and math.clamp(getViewport().Y*0.42,240,380) or 360
-infoH = math.max(infoH, 292)
+-- On mobile: keep the panel narrower so it fits on a phone screen
+local infoW = IS_MOBILE and math.clamp(getViewport().X * 0.88, 220, 270) or 250
+local infoH = IS_MOBILE and math.clamp(getViewport().Y * 0.50, 260, 380) or 360
+infoH = math.max(infoH, 260)
 infoW, infoH = clampPanelSize(infoW, infoH)
 infoPanel.Size = UDim2.fromOffset(infoW, infoH)
-infoPanel.Position = UDim2.new(1, infoW+20, 0.5, 0)
-infoPanel.AnchorPoint = Vector2.new(1,0.5)
+-- Start off-screen to the right; togglePanel will slide it in
+infoPanel.Position = UDim2.new(1, infoW + 20, 0.5, 0)
+infoPanel.AnchorPoint = Vector2.new(1, 0.5)
 infoPanel.BackgroundColor3 = Color3.fromHex("FF8E8E")
 infoPanel.BorderSizePixel = 0
 Instance.new("UICorner",infoPanel).CornerRadius = UDim.new(0,15)
@@ -1103,14 +1109,14 @@ infoStroke.Color=colorBordeEspecial; infoStroke.Thickness=2; infoStroke.ApplyStr
 
 editorToggleBtn = Instance.new("TextButton",infoPanel)
 editorToggleBtn.Name = "EditorToggle"
-editorToggleBtn.Size = UDim2.fromOffset(IS_MOBILE and 34 or 25, IS_MOBILE and 56 or 40)
-editorToggleBtn.Position = UDim2.new(0, IS_MOBILE and -40 or -30, 0.5, 0)
+editorToggleBtn.Size = UDim2.fromOffset(IS_MOBILE and 28 or 25, IS_MOBILE and 48 or 40)
+editorToggleBtn.Position = UDim2.new(0, IS_MOBILE and -33 or -30, 0.5, 0)
 editorToggleBtn.AnchorPoint = Vector2.new(0,0.5)
 editorToggleBtn.BackgroundColor3 = toolColors.settingsBG
 editorToggleBtn.Text = ">"
 editorToggleBtn.TextColor3 = TEXT_COLOR
 editorToggleBtn.Font = Enum.Font.GothamBold
-editorToggleBtn.TextSize = IS_MOBILE and 22 or 18
+editorToggleBtn.TextSize = IS_MOBILE and 18 or 18
 Instance.new("UICorner",editorToggleBtn).CornerRadius = UDim.new(0,8)
 
 innerPanel = Instance.new("Frame",infoPanel)
@@ -1220,8 +1226,8 @@ text3DBtn     = createHistoryBtn(iconIds.text3d)
 
 negateMenu = Instance.new("Frame",ModalUI)
 negateMenu.Name = "NegateMenu"
-local negW = IS_MOBILE and math.clamp(getViewport().X*0.85,260,320) or 280
-local negH = IS_MOBILE and math.clamp(getViewport().Y*0.6,320,440) or 440
+local negW = IS_MOBILE and math.clamp(getViewport().X*0.92, 240, 320) or 280
+local negH = IS_MOBILE and math.clamp(getViewport().Y*0.65, 300, 440) or 440
 negW, negH = clampPanelSize(negW, negH)
 negateMenu.Size = UDim2.fromOffset(negW, negH)
 negateMenu.Position = UDim2.new(0.5,0,0.5,0)
@@ -1234,8 +1240,10 @@ negateStroke.Color=colorBordeEspecial; negateStroke.Thickness=3
 
 negateCloseBtn = Instance.new("ImageButton",negateMenu)
 negateCloseBtn.Name = "CloseNegate"
-negateCloseBtn.Size = UDim2.fromOffset(IS_MOBILE and 42 or 35, IS_MOBILE and 42 or 35)
-negateCloseBtn.Position = UDim2.new(0,IS_MOBILE and -46 or -42, 0, IS_MOBILE and -46 or -42)
+negateCloseBtn.Size = UDim2.fromOffset(IS_MOBILE and 36 or 30, IS_MOBILE and 36 or 30)
+-- Positioned inside the top-right corner of the panel
+negateCloseBtn.Position = UDim2.new(1, IS_MOBILE and -42 or -36, 0, IS_MOBILE and 6 or 5)
+negateCloseBtn.AnchorPoint = Vector2.new(0,0)
 negateCloseBtn.BackgroundColor3 = toolColors.cards
 negateCloseBtn.Image = "rbxassetid://"..iconIds.close
 negateCloseBtn.BorderSizePixel = 0
@@ -1634,15 +1642,15 @@ negateConfirmBtn.MouseButton1Click:Connect(function()
 end)
 
 convertMenu=Instance.new("Frame",ModalUI); convertMenu.Name="ConvertMenu"
-local convW=IS_MOBILE and math.clamp(getViewport().X*0.85,240,320) or 250
-local convH=IS_MOBILE and math.clamp(getViewport().Y*0.65,320,440) or 380
+local convW=IS_MOBILE and math.clamp(getViewport().X*0.92, 230, 320) or 250
+local convH=IS_MOBILE and math.clamp(getViewport().Y*0.70, 300, 440) or 380
 convW,convH=clampPanelSize(convW,convH)
 convertMenu.Size=UDim2.fromOffset(convW,convH); convertMenu.Position=UDim2.new(0.5,0,0.5,0); convertMenu.AnchorPoint=Vector2.new(0.5,0.5)
 convertMenu.BackgroundColor3=toolColors.inner; convertMenu.Visible=false; Instance.new("UICorner",convertMenu)
 convertStroke=Instance.new("UIStroke",convertMenu); convertStroke.Color=colorBordeEspecial; convertStroke.Thickness=3; convertStroke.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
 convertCloseBtn=Instance.new("ImageButton",convertMenu); convertCloseBtn.Name="CloseConvert"
-convertCloseBtn.Size=UDim2.fromOffset(IS_MOBILE and 42 or 35,IS_MOBILE and 42 or 35)
-convertCloseBtn.Position=UDim2.new(0,IS_MOBILE and -46 or -42,0,IS_MOBILE and -46 or -42); convertCloseBtn.AnchorPoint=Vector2.new(0,0)
+convertCloseBtn.Size=UDim2.fromOffset(IS_MOBILE and 36 or 30, IS_MOBILE and 36 or 30)
+convertCloseBtn.Position=UDim2.new(1, IS_MOBILE and -42 or -36, 0, IS_MOBILE and 6 or 5); convertCloseBtn.AnchorPoint=Vector2.new(0,0)
 convertCloseBtn.BackgroundColor3=toolColors.cards; convertCloseBtn.Image="rbxassetid://"..iconIds.close; convertCloseBtn.BorderSizePixel=0
 Instance.new("UICorner",convertCloseBtn).CornerRadius=UDim.new(0,10)
 
@@ -1973,28 +1981,32 @@ Instance.new("UICorner",toggleBtn).CornerRadius=UDim.new(0,8)
 
 function applyToolbarLayout()
     local vps=getViewport(); local margin=getScreenMargin(); local btnCount=6
-    local lift=getBarLift(); local pad=IS_MOBILE and 6 or 8
+    local lift=getBarLift(); local pad=IS_MOBILE and 5 or 8
     local btnSize,barW,barH
     if toolbarEdge=="bottom" or toolbarEdge=="top" then
-        local maxW=IS_MOBILE and (vps.X-margin*2) or math.clamp(vps.X*0.85,320,600)
-        btnSize=math.clamp((maxW-pad*(btnCount+1))/btnCount,MIN_TOUCH,IS_MOBILE and 62 or 64)
-        barW=btnSize*btnCount+pad*(btnCount+1); barH=btnSize+pad*2
-        barW=math.min(barW,vps.X-margin*2)
+        -- Reserve space for all buttons + padding, capped to screen width
+        local maxW = math.min(vps.X - margin*2, IS_MOBILE and vps.X*0.96 or math.clamp(vps.X*0.85,320,600))
+        -- Compute btnSize so all 6 buttons fit, respecting MIN_TOUCH floor
+        btnSize = math.floor((maxW - pad*(btnCount+1)) / btnCount)
+        btnSize = math.clamp(btnSize, MIN_TOUCH, IS_MOBILE and 56 or 64)
+        barW = btnSize*btnCount + pad*(btnCount+1)
+        barW = math.min(barW, vps.X - margin*2)
+        barH = btnSize + pad*2
         toolBar.Size=UDim2.fromOffset(barW,barH)
         if toolbarEdge=="bottom" then toolBar.Position=UDim2.new(0.5,0,1,-(barH+lift))
         else toolBar.Position=UDim2.new(0.5,0,0,IS_MOBILE and 10 or 20) end
         toolBar.AnchorPoint=Vector2.new(0.5,toolbarEdge=="bottom" and 1 or 0)
         layout.FillDirection=Enum.FillDirection.Horizontal
     else
-        btnSize=IS_MOBILE and 60 or 60; barW=btnSize+pad*2; barH=btnSize*btnCount+pad*(btnCount+1)
+        btnSize=IS_MOBILE and 52 or 60; barW=btnSize+pad*2; barH=btnSize*btnCount+pad*(btnCount+1)
         barH=math.min(barH,vps.Y-margin*2)
         toolBar.Size=UDim2.fromOffset(barW,barH)
         if toolbarEdge=="left" then toolBar.Position=UDim2.new(0,margin+4,0.5,0); toolBar.AnchorPoint=Vector2.new(0,0.5)
         else toolBar.Position=UDim2.new(1,-(margin+4),0.5,0); toolBar.AnchorPoint=Vector2.new(1,0.5) end
         layout.FillDirection=Enum.FillDirection.Vertical
     end
-    toggleBtn.Size=UDim2.fromOffset(IS_MOBILE and 36 or 25,IS_MOBILE and 56 or 40)
-    toggleBtn.TextSize=IS_MOBILE and 22 or 18
+    toggleBtn.Size=UDim2.fromOffset(IS_MOBILE and 30 or 25, IS_MOBILE and 48 or 40)
+    toggleBtn.TextSize=IS_MOBILE and 18 or 18
     toggleBtn.AnchorPoint=Vector2.new(0,1)
     if toolbarEdge=="bottom" then toggleBtn.Position=UDim2.new(0.5,toolBar.Size.X.Offset/2+6,1,-lift)
     elseif toolbarEdge=="top" then toggleBtn.Position=UDim2.new(0.5,toolBar.Size.X.Offset/2+6,0,(IS_MOBILE and 10 or 20)+barH); toggleBtn.AnchorPoint=Vector2.new(0,0)
@@ -2008,7 +2020,7 @@ applyToolbarLayout()
 track(cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyToolbarLayout))
 
 gridFrame=Instance.new("Frame",MainUI)
-local gW=IS_MOBILE and 96 or 80; local gH=IS_MOBILE and 64 or 55
+local gW=IS_MOBILE and 82 or 80; local gH=IS_MOBILE and 52 or 55
 gridFrame.Size=UDim2.fromOffset(gW,gH); gridFrame.BackgroundColor3=colorCounter; gridFrame.ClipsDescendants=true
 Instance.new("UICorner",gridFrame).CornerRadius=UDim.new(0,10)
 
@@ -2030,15 +2042,15 @@ gridPlaceholder.Text="grid"; gridPlaceholder.TextColor3=Color3.fromRGB(255,255,2
 snapInput:GetPropertyChangedSignal("Text"):Connect(function() gridPlaceholder.Visible=(snapInput.Text=="") end)
 
 multiSelectBtn=Instance.new("TextButton",gridFrame)
-multiSelectBtn.Size=UDim2.fromOffset(IS_MOBILE and 72 or 60,IS_MOBILE and 48 or 40)
+multiSelectBtn.Size=UDim2.fromOffset(IS_MOBILE and 62 or 60, IS_MOBILE and 40 or 40)
 multiSelectBtn.Position=UDim2.new(1,10,0.5,0); multiSelectBtn.AnchorPoint=Vector2.new(0,0.5)
 multiSelectBtn.BackgroundColor3=Color3.fromHex("D96B6B"); multiSelectBtn.Text="multi"
-multiSelectBtn.Font=Enum.Font.GothamBold; multiSelectBtn.TextColor3=TEXT_COLOR; multiSelectBtn.TextSize=IS_MOBILE and 12 or 10
+multiSelectBtn.Font=Enum.Font.GothamBold; multiSelectBtn.TextColor3=TEXT_COLOR; multiSelectBtn.TextSize=IS_MOBILE and 11 or 10
 Instance.new("UICorner",multiSelectBtn)
 
 function updateGridUI(showMulti)
     local tInfo=TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out)
-    local expandedW=IS_MOBILE and 180 or 150; local collapsedW=IS_MOBILE and 96 or 80
+    local expandedW=IS_MOBILE and 155 or 150; local collapsedW=IS_MOBILE and 82 or 80
     if showMulti and currentMode~="scale" then
         Services.Tweens:Create(gridFrame,tInfo,{Size=UDim2.fromOffset(expandedW,gH)}):Play()
         Services.Tweens:Create(multiSelectBtn,tInfo,{Position=UDim2.new(0,collapsedW+5,0.5,0)}):Play()
@@ -2056,9 +2068,9 @@ multiSelectBtn.MouseButton1Click:Connect(function()
 end)
 
 utilityBtn=Instance.new("TextButton",MainUI)
-utilityBtn.Size=UDim2.fromOffset(IS_MOBILE and 170 or 140,IS_MOBILE and 46 or 35)
+utilityBtn.Size=UDim2.fromOffset(IS_MOBILE and 145 or 140, IS_MOBILE and 40 or 35)
 utilityBtn.BackgroundColor3=toolColors.inner; utilityBtn.TextColor3=TEXT_COLOR; utilityBtn.Font=Enum.Font.GothamBold
-utilityBtn.TextSize=IS_MOBILE and 14 or 12; utilityBtn.Visible=false
+utilityBtn.TextSize=IS_MOBILE and 13 or 12; utilityBtn.Visible=false
 Instance.new("UICorner",utilityBtn).CornerRadius=UDim.new(0,8)
 
 function applyUtilityLayout()
@@ -2104,9 +2116,10 @@ bsStroke.Color = Color3.fromRGB(80, 120, 255); bsStroke.Thickness = 3; bsStroke.
 
 boxSelectLabel = Instance.new("TextLabel", MainUI)
 boxSelectLabel.Name = "BoxSelectLabel"
-boxSelectLabel.Size = UDim2.fromOffset(IS_MOBILE and 220 or 180, IS_MOBILE and 38 or 30)
+boxSelectLabel.Size = UDim2.fromOffset(IS_MOBILE and 200 or 180, IS_MOBILE and 34 or 30)
 boxSelectLabel.AnchorPoint = Vector2.new(0.5, 0)
-boxSelectLabel.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 14 or 10)
+-- On mobile push it down a bit more to avoid system notch/status bar overlap
+boxSelectLabel.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 24 or 10)
 boxSelectLabel.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
 boxSelectLabel.BackgroundTransparency = 0.15
 boxSelectLabel.Text = "box select: drag to select"
@@ -2328,7 +2341,8 @@ settingsStroke=Instance.new("UIStroke",settingsFrame); settingsStroke.Color=colo
 
 function updateSettingsSize()
     local vps=getViewport(); local w,h
-    if IS_MOBILE then w=math.min(560,vps.X*0.96); h=math.min(720,vps.Y*0.92)
+    -- On mobile: cap to 96% of screen width but never more than 380px
+    if IS_MOBILE then w=math.min(380, vps.X*0.96); h=math.min(680, vps.Y*0.92)
     else w=math.min(480,vps.X*0.94); h=math.min(600,vps.Y*0.9) end
     w,h=clampPanelSize(w,h); settingsFrame.Size=UDim2.fromOffset(w,h)
 end
@@ -2336,8 +2350,8 @@ updateSettingsSize()
 track(cam:GetPropertyChangedSignal("ViewportSize"):Connect(updateSettingsSize))
 
 closeBtn=Instance.new("ImageButton",settingsFrame)
-closeBtn.Size=UDim2.fromOffset(IS_MOBILE and 42 or 35,IS_MOBILE and 42 or 35)
-closeBtn.Position=UDim2.new(0,IS_MOBILE and -46 or -42,0,IS_MOBILE and -46 or -42); closeBtn.AnchorPoint=Vector2.new(0,0)
+closeBtn.Size=UDim2.fromOffset(IS_MOBILE and 36 or 30, IS_MOBILE and 36 or 30)
+closeBtn.Position=UDim2.new(1, IS_MOBILE and -42 or -36, 0, IS_MOBILE and 6 or 5); closeBtn.AnchorPoint=Vector2.new(0,0)
 closeBtn.BackgroundColor3=toolColors.cards; closeBtn.Image="rbxassetid://"..iconIds.close; closeBtn.BorderSizePixel=0
 Instance.new("UICorner",closeBtn).CornerRadius=UDim.new(0,10)
 settingsTitle=Instance.new("TextLabel",settingsFrame); settingsTitle.Size=UDim2.new(1,0,0,30); settingsTitle.Position=UDim2.new(0,0,0,8)
@@ -2614,7 +2628,8 @@ end)
 
 function createTool(iconId,callback)
     local b=Instance.new("ImageButton",toolBar)
-    local sz=IS_MOBILE and 62 or 70
+    -- Size is overridden by applyToolbarLayout; set a safe default here
+    local sz=IS_MOBILE and 52 or 60
     b.Size=UDim2.fromOffset(sz,sz); b.BackgroundColor3=toolColors.cards; b.BackgroundTransparency=0
     b.AutoButtonColor=false; b.Image="rbxassetid://"..iconId
     Instance.new("UICorner",b).CornerRadius=UDim.new(0,12)
@@ -3032,12 +3047,16 @@ function confirmTextBuild()
     end)
 end
 
-ProgressFrame=Instance.new("Frame",ModalUI); ProgressFrame.Size=UDim2.new(0,IS_MOBILE and 340 or 300,0,IS_MOBILE and 40 or 30); ProgressFrame.Position=UDim2.new(0.5,IS_MOBILE and -170 or -150,0.1,0); ProgressFrame.BackgroundColor3=toolColors.cards; ProgressFrame.Visible=false; Instance.new("UICorner",ProgressFrame)
+ProgressFrame=Instance.new("Frame",ModalUI)
+ProgressFrame.Size=UDim2.new(IS_MOBILE and 0.9 or 0, IS_MOBILE and 0 or 300, 0, IS_MOBILE and 44 or 30)
+ProgressFrame.AnchorPoint=Vector2.new(0.5,0)
+ProgressFrame.Position=UDim2.new(0.5,0,0.1,0)
+ProgressFrame.BackgroundColor3=toolColors.cards; ProgressFrame.Visible=false; Instance.new("UICorner",ProgressFrame)
 Fill=Instance.new("Frame",ProgressFrame); Fill.Size=UDim2.new(0,0,1,0); Fill.BackgroundColor3=Color3.fromRGB(255,255,255); Instance.new("UICorner",Fill)
 ProgressText=Instance.new("TextLabel",ProgressFrame); ProgressText.Size=UDim2.new(1,0,1,0); ProgressText.BackgroundTransparency=1; ProgressText.TextColor3=TEXT_COLOR; ProgressText.Font=Enum.Font.GothamBold; ProgressText.TextSize=IS_MOBILE and 14 or 12
 
 textConfirmBar=Instance.new("Frame",ModalUI); textConfirmBar.Name="TextConfirmBar"
-local tcbW=IS_MOBILE and math.clamp(getViewport().X*0.9,280,400) or 320; local tcbH=IS_MOBILE and 76 or 60
+local tcbW=IS_MOBILE and math.clamp(getViewport().X*0.92, 240, 380) or 320; local tcbH=IS_MOBILE and 66 or 60
 textConfirmBar.Size=UDim2.fromOffset(tcbW,tcbH); textConfirmBar.AnchorPoint=Vector2.new(0.5,1)
 textConfirmBar.BackgroundColor3=toolColors.inner; textConfirmBar.Visible=false
 Instance.new("UICorner",textConfirmBar).CornerRadius=UDim.new(0,12)
@@ -3069,14 +3088,18 @@ textPanelStroke=Instance.new("UIStroke",textPanel); textPanelStroke.Color=colorB
 
 function updateTextPanelLayout()
     local vps=getViewport(); local panelW,panelH
-    if IS_MOBILE then panelW=vps.X*0.96; panelH=math.clamp(vps.Y*0.75,340,620)
-    else panelW=math.clamp(vps.X*0.94,320,560); panelH=math.clamp(vps.Y*0.72,300,520) end
+    if IS_MOBILE then
+        panelW = math.min(vps.X*0.96, 360)
+        panelH = math.clamp(vps.Y*0.72, 300, 560)
+    else
+        panelW=math.clamp(vps.X*0.94,320,560); panelH=math.clamp(vps.Y*0.72,300,520)
+    end
     panelW,panelH=clampPanelSize(panelW,panelH)
     textPanel.Size=UDim2.fromOffset(panelW,panelH)
     local barH=toolBar.Size.Y.Offset
-    local baseOffset=(toolbarEdge=="bottom") and (barH+(IS_MOBILE and 20 or 30)) or (IS_MOBILE and 20 or 30)
+    local baseOffset=(toolbarEdge=="bottom") and (barH+(IS_MOBILE and 16 or 30)) or (IS_MOBILE and 16 or 30)
     textPanel.Position=UDim2.new(0.5,0,1,-(baseOffset+panelH*0.02))
-    textTitle.TextSize=IS_MOBILE and 17 or 16
+    textTitle.TextSize=IS_MOBILE and 15 or 16
 end
 
 tpcSize=IS_MOBILE and 42 or 32
@@ -3201,8 +3224,8 @@ createTool(iconIds.rotate,activateRotate)
 createTool(iconIds.scale,activateScale)
 
 archMenu=Instance.new("Frame",ModalUI); archMenu.Name="ArchMenu"
-local archW=IS_MOBILE and math.clamp(getViewport().X*0.88,260,340) or 300
-local archH=IS_MOBILE and math.clamp(getViewport().Y*0.65,340,500) or 440
+local archW=IS_MOBILE and math.clamp(getViewport().X*0.92, 250, 340) or 300
+local archH=IS_MOBILE and math.clamp(getViewport().Y*0.70, 320, 500) or 440
 archW,archH=clampPanelSize(archW,archH)
 archMenu.Size=UDim2.fromOffset(archW,archH); archMenu.Position=UDim2.new(0.5,0,0.5,0); archMenu.AnchorPoint=Vector2.new(0.5,0.5)
 archMenu.BackgroundColor3=toolColors.inner; archMenu.Visible=false; Instance.new("UICorner",archMenu)
