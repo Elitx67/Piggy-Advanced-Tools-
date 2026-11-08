@@ -416,21 +416,34 @@ function restoreTransparencies()
     end
 end
 
+-- MODIFICADO: PROTECCIÓN CONTRA NaN / TAMAÑOS INFINITOS
 function updateProxy()
     pruneSelection()
     if #selectedObjects == 0 then proxyPart.CFrame = CFrame.new(0, 10000, 0); return end
     if #selectedObjects == 1 then
         local obj = selectedObjects[1]
         local cf, size = getBoundsOf(obj)
-        proxyPart.Size = size; proxyPart.CFrame = cf; return
+        -- Validación anti-crash
+        if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
+           and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
+            proxyPart.Size = size; proxyPart.CFrame = cf; return
+        else
+            proxyPart.CFrame = CFrame.new(0, 10000, 0); return
+        end
     end
     local minX, minY, minZ = math.huge, math.huge, math.huge
     local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    local validCount = 0
+    
     for _, obj in ipairs(selectedObjects) do
         local cf, size
         if obj:IsA("Model") then cf, size = getModelVisualBox(obj)
         elseif obj:IsA("BasePart") then cf, size = obj.CFrame, obj.Size end
-        if cf then
+        
+        -- Validación anti-crash
+        if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
+           and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
+            validCount = validCount + 1
             local corners = {
                 cf*CFrame.new( size.X/2,  size.Y/2,  size.Z/2),
                 cf*CFrame.new(-size.X/2,  size.Y/2,  size.Z/2),
@@ -443,12 +456,19 @@ function updateProxy()
             }
             for _, corner in ipairs(corners) do
                 local p = corner.Position
-                minX=math.min(minX,p.X); maxX=math.max(maxX,p.X)
-                minY=math.min(minY,p.Y); maxY=math.max(maxY,p.Y)
-                minZ=math.min(minZ,p.Z); maxZ=math.max(maxZ,p.Z)
+                if p.X == p.X and p.Y == p.Y and p.Z == p.Z and p.X ~= math.huge and p.Y ~= math.huge and p.Z ~= math.huge then
+                    minX=math.min(minX,p.X); maxX=math.max(maxX,p.X)
+                    minY=math.min(minY,p.Y); maxY=math.max(maxY,p.Y)
+                    minZ=math.min(minZ,p.Z); maxZ=math.max(maxZ,p.Z)
+                end
             end
         end
     end
+    
+    if validCount == 0 or minX == math.huge or minX ~= minX then 
+        proxyPart.CFrame = CFrame.new(0, 10000, 0); return 
+    end
+    
     proxyPart.Size = Vector3.new(maxX-minX, maxY-minY, maxZ-minZ)
     proxyPart.CFrame = CFrame.new((minX+maxX)/2, (minY+maxY)/2, (minZ+maxZ)/2)
 end
@@ -474,7 +494,7 @@ function syncFilter(target)
     end
 end
 
-local moveTimestamps = {}
+local moveTimestamps = setmetatable({}, {__mode="k"})
 
 function forceUpdate(target, mode)
     if not target then return end
@@ -700,7 +720,7 @@ lastMirrorTick = 0
 activeHandle = nil
 activeIsRot = false
 activeReset = nil
-tapRecords = {}
+tapRecords = setmetatable({}, {__mode="k"})
 
 colorActivo         = Color3.fromHex("FF6B6B")
 colorInactivo       = Color3.fromHex("D96B6B")
@@ -1348,47 +1368,110 @@ negateProgressText.Font=Enum.Font.Gotham; negateProgressText.TextSize=IS_MOBILE 
 negatePreviewEnabled = false
 negatePreviewParts   = {}
 
-local function destroyNegatePreview()
-    for _, entry in ipairs(negatePreviewParts) do
-        pcall(function() entry.previewPart:Destroy() end)
-    end
-    negatePreviewParts = {}
+-- ============================================================
+-- NEGATE TOOL v2 : helpers (marking is LOCAL only, originals restored on clear)
+-- ============================================================
+negatePreviewFolder = Instance.new("Folder")
+negatePreviewFolder.Name = "PAT_NegPreview"
+negatePreviewFolder.Parent = workspace:FindFirstChild("Terrain") or workspace
+trackInst(negatePreviewFolder)
+
+negateOriginal  = {}   -- [BasePart] = {Color=, Transparency=}
+negatePartsOf   = {}   -- [container] = {BasePart,...}
+negateMarkedSet = {}   -- [container] = true
+negateBusy      = false
+
+function validBox(cf, size)
+    return cf ~= nil and size ~= nil
+        and size.X == size.X and size.Y == size.Y and size.Z == size.Z
+        and size.X > 0 and size.Y > 0 and size.Z > 0
+        and size.X < 1e5 and size.Y < 1e5 and size.Z < 1e5
+        and cf.Position.X == cf.Position.X and cf.Position.Y == cf.Position.Y and cf.Position.Z == cf.Position.Z
 end
 
-local function buildNegatePreview()
+-- True for players' characters and any NPC (Model with Humanoid)
+function isPlayerObject(inst)
+    if not inst then return false end
+    for _, pl in ipairs(Services.Players:GetPlayers()) do
+        local ch = pl.Character
+        if ch and (inst == ch or inst:IsDescendantOf(ch)) then return true end
+    end
+    local cur = inst
+    while cur and cur ~= workspace and cur ~= game do
+        if cur:IsA("Model") and cur:FindFirstChildOfClass("Humanoid") then return true end
+        cur = cur.Parent
+    end
+    return false
+end
+
+function getIgnoreList()
+    local list = {proxyPart, rotateProxy, negateProxy, globalMoveProxy, negatePreviewFolder}
+    for _, pl in ipairs(Services.Players:GetPlayers()) do
+        if pl.Character then list[#list+1] = pl.Character end
+    end
+    return list
+end
+
+-- Block = Model that has a ColorPart (any depth). Fallback: plain part inside workspace.BuildModel
+function resolveBlock(inst)
+    local cur = inst
+    while cur and cur ~= workspace and cur ~= game do
+        if cur:IsA("Model") and cur:FindFirstChild("ColorPart") then return cur end
+        cur = cur.Parent
+    end
+    return nil
+end
+
+function resolveNegatable(inst)
+    if not inst or not inst.Parent then return nil end
+    if inst:IsA("Terrain") or isPlayerObject(inst) then return nil end
+    if inst.Name:sub(1,4) == "PAT_" or inst.Name:sub(1,4) == "T3D_" or inst.Name:sub(1,9) == "ArchPrev_" then return nil end
+    local block = resolveBlock(inst)
+    if block then return block end
+    local root = workspace:FindFirstChild("BuildModel")
+    if root and inst:IsA("BasePart") and inst:IsDescendantOf(root) then return inst end
+    return nil
+end
+
+function negateVisualParts(container, includeInvisible)
+    local out = {}
+    if container:IsA("BasePart") then
+        out[1] = container
+    else
+        for _, d in ipairs(container:GetDescendants()) do
+            if d:IsA("BasePart") and d.Name ~= "MouseFilterPart" and d.Name ~= "base" then out[#out+1] = d end
+        end
+    end
+    if not includeInvisible then
+        for i = #out, 1, -1 do if out[i].Transparency >= 1 then table.remove(out, i) end end
+    end
+    return out
+end
+
+function destroyNegatePreview()
+    pcall(function() negatePreviewFolder:ClearAllChildren() end)
+end
+
+function buildNegatePreview()
     destroyNegatePreview()
-    if not negatePreviewEnabled or #negateMarked == 0 then return end
-    for _, obj in ipairs(negateMarked) do
-        pcall(function()
-            local previewParts = {}
-            if obj:IsA("Model") then
-                for _, c in ipairs(obj:GetDescendants()) do
-                    if c:IsA("BasePart") then
-                        local pp = Instance.new("Part")
-                        pp.Name = "PAT_NegPreview"
-                        pp.Size = c.Size; pp.CFrame = c.CFrame
-                        pp.Anchored = true; pp.CanCollide = false; pp.CanQuery = false
-                        pp.Transparency = 0.45
-                        pp.Color = Color3.fromRGB(255,30,30)
-                        pp.Material = Enum.Material.Neon
-                        pp.CastShadow = false
-                        pp.Parent = workspace
-                        table.insert(negatePreviewParts, {previewPart=pp})
-                    end
-                end
-            elseif obj:IsA("BasePart") then
-                local pp = Instance.new("Part")
-                pp.Name = "PAT_NegPreview"
-                pp.Size = obj.Size; pp.CFrame = obj.CFrame
-                pp.Anchored = true; pp.CanCollide = false; pp.CanQuery = false
-                pp.Transparency = 0.45
-                pp.Color = Color3.fromRGB(255,30,30)
-                pp.Material = Enum.Material.Neon
-                pp.CastShadow = false
-                pp.Parent = workspace
-                table.insert(negatePreviewParts, {previewPart=pp})
+    if not negatePreviewEnabled then return end
+    for _, container in ipairs(negateMarked) do
+        if container and container.Parent then
+            for _, part in ipairs(negateVisualParts(container, true)) do
+                pcall(function()
+                    local pp = Instance.new("Part")
+                    pp.Name = "PAT_NegPreview"
+                    pp.Size = part.Size + Vector3.new(0.03, 0.03, 0.03)
+                    pp.CFrame = part.CFrame
+                    pp.Anchored = true; pp.CanCollide = false; pp.CanQuery = false; pp.CanTouch = false
+                    pp.Transparency = 0.45
+                    pp.Color = Color3.fromRGB(255, 30, 30)
+                    pp.Material = Enum.Material.Neon
+                    pp.CastShadow = false
+                    pp.Parent = negatePreviewFolder
+                end)
             end
-        end)
+        end
     end
 end
 
@@ -1400,42 +1483,88 @@ negatePreviewBtn.MouseButton1Click:Connect(function()
     if negatePreviewEnabled then buildNegatePreview() else destroyNegatePreview() end
 end)
 
+function negatePaint(container)
+    local list = {}
+    for _, p in ipairs(negateVisualParts(container, false)) do
+        if not negateOriginal[p] then negateOriginal[p] = {Color = p.Color, Transparency = p.Transparency} end
+        list[#list+1] = p
+        pcall(function()
+            p.Color = Color3.fromRGB(255, 40, 40)
+            p.Transparency = math.min(p.Transparency, 0.5)
+        end)
+    end
+    negatePartsOf[container] = list
+end
+
+function negateRestore(container)
+    local list = negatePartsOf[container]
+    if list then
+        for _, p in ipairs(list) do
+            local o = negateOriginal[p]
+            if o then
+                if p.Parent then pcall(function() p.Color = o.Color; p.Transparency = o.Transparency end) end
+                negateOriginal[p] = nil
+            end
+        end
+    end
+    negatePartsOf[container] = nil
+end
+
+function pruneNegate()
+    for i = #negateMarked, 1, -1 do
+        local c = negateMarked[i]
+        if not c or not c.Parent then
+            negateRestore(c); negateMarkedSet[c] = nil
+            table.remove(negateMarked, i)
+        end
+    end
+end
+
 function updateNegateCount()
+    pruneNegate()
     negateCountLabel.Text = "marked: "..tostring(#negateMarked)
     if negatePreviewEnabled then buildNegatePreview() end
 end
 
 function clearNegateMarks()
-    destroyNegatePreview()
-    for _, obj in ipairs(negateMarked) do
-        pcall(function()
-            if obj:IsA("Model") then
-                for _, c in ipairs(obj:GetDescendants()) do
-                    if c:IsA("BasePart") then c.Transparency=0 end
-                end
-            elseif obj:IsA("BasePart") then obj.Transparency=0 end
-        end)
+    for _, c in ipairs(negateMarked) do negateRestore(c) end
+    negateMarked = {}; negateMarkedSet = {}; negatePartsOf = {}
+    for p, o in pairs(negateOriginal) do   -- safety net: restore anything left over
+        if p and p.Parent then pcall(function() p.Color = o.Color; p.Transparency = o.Transparency end) end
     end
-    negateMarked={}
+    negateOriginal = {}
+    destroyNegatePreview()
     updateNegateCount()
 end
 
 function markNegate(obj)
-    for _, v in ipairs(negateMarked) do if v==obj then return end end
-    table.insert(negateMarked, obj)
-    pcall(function()
-        if obj:IsA("Model") then
-            for _,c in ipairs(obj:GetDescendants()) do
-                if c:IsA("BasePart") then c.Transparency=0.6; c.Color=Color3.fromRGB(255,40,40) end
-            end
-        elseif obj:IsA("BasePart") then obj.Transparency=0.6; obj.Color=Color3.fromRGB(255,40,40) end
-    end)
+    local container = resolveNegatable(obj)
+    if not container or negateMarkedSet[container] then return false end
+    negateMarkedSet[container] = true
+    table.insert(negateMarked, container)
+    negatePaint(container)
     updateNegateCount()
+    return true
+end
+
+function unmarkNegate(container)
+    if not negateMarkedSet[container] then return end
+    negateRestore(container)
+    negateMarkedSet[container] = nil
+    for i, c in ipairs(negateMarked) do if c == container then table.remove(negateMarked, i); break end end
+    updateNegateCount()
+end
+
+-- click on a block: mark it; click again: unmark it
+function toggleNegate(inst)
+    local container = resolveNegatable(inst)
+    if not container then showToast("not a block (or a player) - ignored", colorInfo); return end
+    if negateMarkedSet[container] then unmarkNegate(container) else markNegate(container) end
 end
 
 function getRealTarget(hit)
     if not hit then return nil end
-    if (hit.Name=="MouseFilterPart" or hit.Name=="base") and hit.Parent:FindFirstChild("ColorPart") then return hit.Parent.ColorPart end
+    if (hit.Name=="MouseFilterPart" or hit.Name=="base") and hit.Parent and hit.Parent:FindFirstChild("ColorPart") then return hit.Parent.ColorPart end
     local model=hit:FindFirstAncestorOfClass("Model"); if model and model~=workspace and not model:FindFirstAncestorOfClass("Model") then return model end
     return hit
 end
@@ -1456,197 +1585,392 @@ function getBlockInfo(target)
     return container, colorPart
 end
 
+-- ============================================================
+-- NEGATE TOOL v2 : geometry (everything is computed in the TARGET'S LOCAL SPACE,
+-- so rotated blocks keep their exact rotation after being cut)
+-- ============================================================
 function getAABB(target)
-    if target:IsA("Model") then
-        local cf,size=getModelVisualBox(target)
-        return cf,size,cf.Position-size/2,cf.Position+size/2
-    else
-        local cf,size=target.CFrame,target.Size
-        return cf,size,cf.Position-size/2,cf.Position+size/2
-    end
+    local cf, size = getBoundsOf(target)
+    return cf, size, cf.Position - size/2, cf.Position + size/2
 end
 
+-- exact 3D box split (all values in the same axis-aligned space)
 function splitBoxByBox(blockMin, blockMax, cutMin, cutMax)
-    local intMin=Vector3.new(math.max(blockMin.X,cutMin.X),math.max(blockMin.Y,cutMin.Y),math.max(blockMin.Z,cutMin.Z))
-    local intMax=Vector3.new(math.min(blockMax.X,cutMax.X),math.min(blockMax.Y,cutMax.Y),math.min(blockMax.Z,cutMax.Z))
-    if intMin.X>=intMax.X-0.01 or intMin.Y>=intMax.Y-0.01 or intMin.Z>=intMax.Z-0.01 then
-        return {{min=blockMin,max=blockMax}}
+    local intMin = Vector3.new(math.max(blockMin.X,cutMin.X), math.max(blockMin.Y,cutMin.Y), math.max(blockMin.Z,cutMin.Z))
+    local intMax = Vector3.new(math.min(blockMax.X,cutMax.X), math.min(blockMax.Y,cutMax.Y), math.min(blockMax.Z,cutMax.Z))
+    if intMin.X >= intMax.X-0.01 or intMin.Y >= intMax.Y-0.01 or intMin.Z >= intMax.Z-0.01 then
+        return {{min=blockMin, max=blockMax}}
     end
-    local result={}
-    if intMin.X>blockMin.X+0.01 then table.insert(result,{min=blockMin,max=Vector3.new(intMin.X,blockMax.Y,blockMax.Z)}) end
-    if intMax.X<blockMax.X-0.01 then table.insert(result,{min=Vector3.new(intMax.X,blockMin.Y,blockMin.Z),max=blockMax}) end
-    if intMin.Y>blockMin.Y+0.01 then table.insert(result,{min=Vector3.new(intMin.X,blockMin.Y,blockMin.Z),max=Vector3.new(intMax.X,intMin.Y,blockMax.Z)}) end
-    if intMax.Y<blockMax.Y-0.01 then table.insert(result,{min=Vector3.new(intMin.X,intMax.Y,blockMin.Z),max=Vector3.new(intMax.X,blockMax.Y,blockMax.Z)}) end
-    if intMin.Z>blockMin.Z+0.01 then table.insert(result,{min=Vector3.new(intMin.X,intMin.Y,blockMin.Z),max=Vector3.new(intMax.X,intMax.Y,intMin.Z)}) end
-    if intMax.Z<blockMax.Z-0.01 then table.insert(result,{min=Vector3.new(intMin.X,intMin.Y,intMax.Z),max=Vector3.new(intMax.X,intMax.Y,blockMax.Z)}) end
-    return result
+    local r = {}
+    if intMin.X > blockMin.X+0.01 then table.insert(r,{min=blockMin, max=Vector3.new(intMin.X,blockMax.Y,blockMax.Z)}) end
+    if intMax.X < blockMax.X-0.01 then table.insert(r,{min=Vector3.new(intMax.X,blockMin.Y,blockMin.Z), max=blockMax}) end
+    if intMin.Y > blockMin.Y+0.01 then table.insert(r,{min=Vector3.new(intMin.X,blockMin.Y,blockMin.Z), max=Vector3.new(intMax.X,intMin.Y,blockMax.Z)}) end
+    if intMax.Y < blockMax.Y-0.01 then table.insert(r,{min=Vector3.new(intMin.X,intMax.Y,blockMin.Z), max=Vector3.new(intMax.X,blockMax.Y,blockMax.Z)}) end
+    if intMin.Z > blockMin.Z+0.01 then table.insert(r,{min=Vector3.new(intMin.X,intMin.Y,blockMin.Z), max=Vector3.new(intMax.X,intMax.Y,intMin.Z)}) end
+    if intMax.Z < blockMax.Z-0.01 then table.insert(r,{min=Vector3.new(intMin.X,intMin.Y,intMax.Z), max=Vector3.new(intMax.X,intMax.Y,blockMax.Z)}) end
+    return r
 end
 
+-- oriented box vs oriented box (separating axis test). shrink => touching faces do NOT count
+function obbIntersect(cfA, sA, cfB, sB, shrink)
+    shrink = shrink or 0.01
+    local a = {sA.X/2-shrink, sA.Y/2-shrink, sA.Z/2-shrink}
+    local b = {sB.X/2-shrink, sB.Y/2-shrink, sB.Z/2-shrink}
+    local rel = cfA:ToObjectSpace(cfB)
+    local p = rel.Position; local t = {p.X, p.Y, p.Z}
+    local _,_,_,r11,r12,r13,r21,r22,r23,r31,r32,r33 = rel:GetComponents()
+    local R = {{r11,r12,r13},{r21,r22,r23},{r31,r32,r33}}
+    local AR = {}
+    for i = 1,3 do AR[i] = {}; for j = 1,3 do AR[i][j] = math.abs(R[i][j]) + 1e-6 end end
+    for i = 1,3 do
+        if math.abs(t[i]) > a[i] + b[1]*AR[i][1] + b[2]*AR[i][2] + b[3]*AR[i][3] then return false end
+    end
+    for j = 1,3 do
+        local d = math.abs(t[1]*R[1][j] + t[2]*R[2][j] + t[3]*R[3][j])
+        if d > a[1]*AR[1][j] + a[2]*AR[2][j] + a[3]*AR[3][j] + b[j] then return false end
+    end
+    for i = 1,3 do
+        local i1, i2 = i%3+1, (i+1)%3+1
+        for j = 1,3 do
+            local j1, j2 = j%3+1, (j+1)%3+1
+            local ra = a[i1]*AR[i2][j] + a[i2]*AR[i1][j]
+            local rb = b[j1]*AR[i][j2] + b[j2]*AR[i][j1]
+            if math.abs(t[i2]*R[i1][j] - t[i1]*R[i2][j]) > ra + rb then return false end
+        end
+    end
+    return true
+end
+
+function relIsAligned(rel)
+    local _,_,_,r11,r12,r13,r21,r22,r23,r31,r32,r33 = rel:GetComponents()
+    local function ok(x,y,z) return math.max(math.abs(x),math.abs(y),math.abs(z)) > 0.99999 end
+    return ok(r11,r12,r13) and ok(r21,r22,r23) and ok(r31,r32,r33)
+end
+
+function boxFullyInsideBox(innerCF, innerSize, outerCF, outerSize)
+    local rel = outerCF:ToObjectSpace(innerCF)
+    local h = innerSize/2; local o = outerSize/2 + Vector3.new(0.01,0.01,0.01)
+    for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
+        local q = rel:PointToWorldSpace(Vector3.new(sx*h.X, sy*h.Y, sz*h.Z))
+        if math.abs(q.X) > o.X or math.abs(q.Y) > o.Y or math.abs(q.Z) > o.Z then return false end
+    end end end
+    return true
+end
+
+-- returns shape ("box"/"sphere"/"cylinder"/"wedge") and the cylinder axis ("X","Y","Z")
 function getShapeType(container)
-    local name=(container.Name or ""):lower()
+    local vp = getVisualPart(container)
+    if vp and vp:IsA("Part") then
+        if vp.Shape == Enum.PartType.Ball then return "sphere" end
+        if vp.Shape == Enum.PartType.Cylinder then return "cylinder", "X" end
+    end
+    local name = (container.Name or ""):lower()
     if name:find("sphere") then return "sphere" end
-    if name:find("cylinder") then return "cylinder" end
+    if name:find("cylinder") then return "cylinder", "Z" end
+    if name:find("wedge") then return "wedge" end
     return "box"
 end
 
-function isPointInsideShape(container, worldPoint)
-    local shape=getShapeType(container)
-    local cf,size,_,_=getAABB(container)
-    local localPt=cf:PointToObjectSpace(worldPoint)
-    local hx,hy,hz=size.X/2,size.Y/2,size.Z/2
-    if shape=="sphere" then
-        local r=math.min(hx,hy,hz)
-        return localPt.Magnitude<=r+0.01
-    elseif shape=="cylinder" then
-        local r=math.min(hx,hy)
-        local radial=math.sqrt(localPt.X^2+localPt.Y^2)
-        return math.abs(localPt.Z)<=hz+0.01 and radial<=r+0.01
-    else
-        return math.abs(localPt.X)<=hx+0.01 and math.abs(localPt.Y)<=hy+0.01 and math.abs(localPt.Z)<=hz+0.01
+-- point p is relative to the box centre (local space)
+function pointInShape(shape, axis, size, p, tol)
+    tol = tol or 0.001
+    local hx, hy, hz = size.X/2, size.Y/2, size.Z/2
+    if shape == "sphere" then
+        return (p.X/hx)^2 + (p.Y/hy)^2 + (p.Z/hz)^2 <= 1 + tol
+    elseif shape == "cylinder" then
+        if axis == "X" then return math.abs(p.X) <= hx+tol and (p.Y/hy)^2 + (p.Z/hz)^2 <= 1+tol
+        elseif axis == "Y" then return math.abs(p.Y) <= hy+tol and (p.X/hx)^2 + (p.Z/hz)^2 <= 1+tol end
+        return math.abs(p.Z) <= hz+tol and (p.X/hx)^2 + (p.Y/hy)^2 <= 1+tol
     end
+    return math.abs(p.X) <= hx+tol and math.abs(p.Y) <= hy+tol and math.abs(p.Z) <= hz+tol
 end
 
-function voxelizeShapeAdaptive(container, negateBoxes, baseRes)
-    baseRes=baseRes or VOXEL_RESOLUTION
-    local _,size,bmin,bmax=getAABB(container)
-    local intMin=Vector3.new(math.huge,math.huge,math.huge)
-    local intMax=Vector3.new(-math.huge,-math.huge,-math.huge)
-    for _,nb in ipairs(negateBoxes) do
-        if bmax.X>nb.min.X and bmin.X<nb.max.X and bmax.Y>nb.min.Y and bmin.Y<nb.max.Y and bmax.Z>nb.min.Z and bmin.Z<nb.max.Z then
-            intMin=Vector3.new(math.min(intMin.X,math.max(bmin.X,nb.min.X)),math.min(intMin.Y,math.max(bmin.Y,nb.min.Y)),math.min(intMin.Z,math.max(bmin.Z,nb.min.Z)))
-            intMax=Vector3.new(math.max(intMax.X,math.min(bmax.X,nb.max.X)),math.max(intMax.Y,math.min(bmax.Y,nb.max.Y)),math.max(intMax.Z,math.min(bmax.Z,nb.max.Z)))
+-- Adaptive voxelisation in LOCAL space.
+-- cutters: { {aligned=bool, mn=Vector3, mx=Vector3, inv=CFrame, half=Vector3}, ... } all in the target's local space
+function voxelizeLocal(shape, axis, size, cutters, maxPieces)
+    local baseRes = (shape == "box") and 4 or (VOXEL_RESOLUTION or 8)
+    local maxNear = (shape == "box") and 3 or 2
+    local pieces = {}
+    local capped = false
+
+    local function inCutterPoint(p)
+        for _, c in ipairs(cutters) do
+            if c.aligned then
+                if p.X > c.mn.X and p.X < c.mx.X and p.Y > c.mn.Y and p.Y < c.mx.Y and p.Z > c.mn.Z and p.Z < c.mx.Z then return true end
+            else
+                local q = c.inv:PointToObjectSpace(p)
+                if math.abs(q.X) < c.half.X and math.abs(q.Y) < c.half.Y and math.abs(q.Z) < c.half.Z then return true end
+            end
+        end
+        return false
+    end
+
+    -- 0 = no cutter touches the cell, 1 = partially, 2 = fully inside a cutter
+    local function cutterState(c0, h)
+        local state = 0
+        for _, c in ipairs(cutters) do
+            if c.aligned then
+                local e = 0.005
+                if c0.X+h.X <= c.mn.X+e or c0.X-h.X >= c.mx.X-e or c0.Y+h.Y <= c.mn.Y+e or c0.Y-h.Y >= c.mx.Y-e or c0.Z+h.Z <= c.mn.Z+e or c0.Z-h.Z >= c.mx.Z-e then
+                    -- disjoint
+                elseif c0.X-h.X >= c.mn.X-e and c0.X+h.X <= c.mx.X+e and c0.Y-h.Y >= c.mn.Y-e and c0.Y+h.Y <= c.mx.Y+e and c0.Z-h.Z >= c.mn.Z-e and c0.Z+h.Z <= c.mx.Z+e then
+                    return 2
+                else state = 1 end
+            else
+                local full = true
+                for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
+                    local q = c.inv:PointToObjectSpace(c0 + Vector3.new(sx*h.X, sy*h.Y, sz*h.Z))
+                    if math.abs(q.X) > c.half.X+0.005 or math.abs(q.Y) > c.half.Y+0.005 or math.abs(q.Z) > c.half.Z+0.005 then full = false end
+                end end end
+                if full then return 2 end
+                local q = c.inv:PointToObjectSpace(c0); local r = h.Magnitude
+                if math.abs(q.X) <= c.half.X+r and math.abs(q.Y) <= c.half.Y+r and math.abs(q.Z) <= c.half.Z+r then state = 1 end
+            end
+        end
+        return state
+    end
+
+    local function shapeState(c0, h)
+        if shape == "box" then return 2 end
+        local n = 0
+        for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
+            if pointInShape(shape, axis, size, c0 + Vector3.new(sx*h.X, sy*h.Y, sz*h.Z)) then n = n + 1 end
+        end end end
+        if n == 8 then return 2 end
+        if n > 0 or pointInShape(shape, axis, size, c0) then return 1 end
+        return 0
+    end
+
+    local function add(c0, h)
+        if #pieces >= maxPieces then capped = true; return end
+        pieces[#pieces+1] = {center = c0, size = h*2}
+    end
+
+    local function rec(c0, h, depth)
+        if capped then return end
+        local ss = shapeState(c0, h); if ss == 0 then return end
+        local cs = cutterState(c0, h); if cs == 2 then return end
+        if ss == 2 and cs == 0 then add(c0, h); return end
+        local limit = (cs == 0) and 0 or maxNear
+        if depth < limit and math.min(h.X, h.Y, h.Z) > 0.05 then
+            local q = h/2
+            for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
+                rec(c0 + Vector3.new(sx*q.X, sy*q.Y, sz*q.Z), q, depth+1)
+            end end end
+        else
+            if pointInShape(shape, axis, size, c0, 0) and not inCutterPoint(c0) then add(c0, h) end
         end
     end
-    local coarseCell=Vector3.new(size.X/baseRes,size.Y/baseRes,size.Z/baseRes)
-    local fineCell=coarseCell/2
-    local fineZoneMin=intMin-coarseCell*2; local fineZoneMax=intMax+coarseCell*2
-    local pieces={}
-    for ix=0,baseRes-1 do for iy=0,baseRes-1 do for iz=0,baseRes-1 do
-        local cc=bmin+Vector3.new((ix+0.5)*coarseCell.X,(iy+0.5)*coarseCell.Y,(iz+0.5)*coarseCell.Z)
-        local ccMin=cc-coarseCell/2; local ccMax=cc+coarseCell/2
-        if not (ccMax.X>fineZoneMin.X and ccMin.X<fineZoneMax.X and ccMax.Y>fineZoneMin.Y and ccMin.Y<fineZoneMax.Y and ccMax.Z>fineZoneMin.Z and ccMin.Z<fineZoneMax.Z) then
-            if isPointInsideShape(container,cc) then
-                local skip=false
-                for _,nb in ipairs(negateBoxes) do
-                    if ccMax.X>nb.min.X+0.01 and ccMin.X<nb.max.X-0.01 and ccMax.Y>nb.min.Y+0.01 and ccMin.Y<nb.max.Y-0.01 and ccMax.Z>nb.min.Z+0.01 and ccMin.Z<nb.max.Z-0.01 then skip=true; break end
-                end
-                if not skip then table.insert(pieces,{cf=CFrame.new(cc),size=coarseCell}) end
+
+    local cell = Vector3.new(size.X/baseRes, size.Y/baseRes, size.Z/baseRes)
+    local h = cell/2
+    for ix = 0, baseRes-1 do for iy = 0, baseRes-1 do for iz = 0, baseRes-1 do
+        local c0 = -size/2 + Vector3.new((ix+0.5)*cell.X, (iy+0.5)*cell.Y, (iz+0.5)*cell.Z)
+        rec(c0, h, 0)
+    end end end
+    return pieces, capped
+end
+
+-- Builds the list of pieces (world CFrame + size) that remain of `container` after the cut.
+-- Returns pieces, status   (status: "ok", "wedge", "capped")
+function computePiecesForTarget(container, tcf, tsize, cutters)
+    local shape, axis = getShapeType(container)
+    local rels = {}
+    for _, cu in ipairs(cutters) do
+        if obbIntersect(tcf, tsize, cu.cf, cu.size, 0.01) then
+            local rel = tcf:ToObjectSpace(cu.cf)
+            rels[#rels+1] = {cu = cu, rel = rel, aligned = relIsAligned(rel)}
+        end
+    end
+    if #rels == 0 then return nil, "untouched" end
+
+    if shape == "wedge" then
+        -- a wedge can't be cut exactly: only remove it when a cutter swallows it completely
+        for _, r in ipairs(rels) do
+            if boxFullyInsideBox(tcf, tsize, r.cu.cf, r.cu.size) then return {}, "ok" end
+        end
+        return nil, "wedge"
+    end
+
+    local allAligned = true
+    for _, r in ipairs(rels) do if not r.aligned then allAligned = false end end
+
+    local pieces = {}
+    if shape == "box" and allAligned then
+        local remaining = {{min = -tsize/2, max = tsize/2}}
+        for _, r in ipairs(rels) do
+            local ex = worldExtents(r.rel, r.cu.size)
+            local cmin = r.rel.Position - ex/2; local cmax = r.rel.Position + ex/2
+            local nr = {}
+            for _, pc in ipairs(remaining) do
+                for _, s in ipairs(splitBoxByBox(pc.min, pc.max, cmin, cmax)) do nr[#nr+1] = s end
+            end
+            remaining = nr
+        end
+        for _, pc in ipairs(remaining) do
+            local sz = pc.max - pc.min
+            if sz.X > 0.05 and sz.Y > 0.05 and sz.Z > 0.05 then
+                pieces[#pieces+1] = {cf = tcf * CFrame.new((pc.min + pc.max)/2), size = sz}
             end
         end
-    end end end
-    local fxMin=math.floor((fineZoneMin.X-bmin.X)/fineCell.X)-1; local fyMin=math.floor((fineZoneMin.Y-bmin.Y)/fineCell.Y)-1; local fzMin=math.floor((fineZoneMin.Z-bmin.Z)/fineCell.Z)-1
-    local fxMax=math.ceil((fineZoneMax.X-bmin.X)/fineCell.X)+1; local fyMax=math.ceil((fineZoneMax.Y-bmin.Y)/fineCell.Y)+1; local fzMax=math.ceil((fineZoneMax.Z-bmin.Z)/fineCell.Z)+1
-    for ix=fxMin,fxMax do for iy=fyMin,fyMax do for iz=fzMin,fzMax do
-        local fc=bmin+Vector3.new((ix+0.5)*fineCell.X,(iy+0.5)*fineCell.Y,(iz+0.5)*fineCell.Z)
-        if fc.X>=bmin.X-0.01 and fc.X<=bmax.X+0.01 and fc.Y>=bmin.Y-0.01 and fc.Y<=bmax.Y+0.01 and fc.Z>=bmin.Z-0.01 and fc.Z<=bmax.Z+0.01 then
-            if fc.X>=fineZoneMin.X and fc.X<=fineZoneMax.X and fc.Y>=fineZoneMin.Y and fc.Y<=fineZoneMax.Y and fc.Z>=fineZoneMin.Z and fc.Z<=fineZoneMax.Z then
-                if isPointInsideShape(container,fc) then
-                    local fcMin=fc-fineCell/2; local fcMax=fc+fineCell/2
-                    local skip=false
-                    for _,nb in ipairs(negateBoxes) do
-                        if fcMax.X>nb.min.X+0.01 and fcMin.X<nb.max.X-0.01 and fcMax.Y>nb.min.Y+0.01 and fcMin.Y<nb.max.Y-0.01 and fcMax.Z>nb.min.Z+0.01 and fcMin.Z<nb.max.Z-0.01 then skip=true; break end
-                    end
-                    if not skip then table.insert(pieces,{cf=CFrame.new(fc),size=fineCell}) end
-                end
-            end
+        return pieces, "ok"
+    end
+
+    local lc = {}
+    for _, r in ipairs(rels) do
+        local ex = worldExtents(r.rel, r.cu.size)
+        lc[#lc+1] = {aligned = r.aligned, mn = r.rel.Position - ex/2, mx = r.rel.Position + ex/2, inv = r.rel, half = r.cu.size/2}
+    end
+    local vox, capped = voxelizeLocal(shape, axis, tsize, lc, 1200)
+    for _, v in ipairs(vox) do
+        if v.size.X > 0.05 and v.size.Y > 0.05 and v.size.Z > 0.05 then
+            pieces[#pieces+1] = {cf = tcf * CFrame.new(v.center), size = v.size, voxel = true}
         end
-    end end end
-    return pieces
+    end
+    return pieces, capped and "capped" or "ok"
+end
+
+function poseOk(blk, cf)
+    if not blk or not blk.Parent then return false end
+    local ok, p = pcall(function() return blk:GetPivot() end)
+    if not ok then return false end
+    return (p.Position - cf.Position).Magnitude < 0.1 and p.LookVector:Dot(cf.LookVector) > 0.999 and p.UpVector:Dot(cf.UpVector) > 0.999
 end
 
 function performRealNegate()
-    if #negateMarked==0 then return end
-    local functions=Services.Replicated:FindFirstChild("Functions",true)
-    if not functions then return end
-    local placeFunc=functions:FindFirstChild("PlaceBlock")
-    local resizeFunc=functions:FindFirstChild("CommitResize")
-    local fillFunc=functions:FindFirstChild("FillBlock")
-    local moveFunc=functions:FindFirstChild("CommitMove")
-    local destroyFunc=functions:FindFirstChild("DestroyBlock")
-    if not (placeFunc and resizeFunc and moveFunc and destroyFunc) then return end
+    if negateBusy then return end
+    pruneNegate()
+    if #negateMarked == 0 then return end
+    local functions = Services.Replicated:FindFirstChild("Functions", true)
+    if not functions then showToast("server remotes not found", colorEliminarCard); return end
+    local placeFunc, resizeFunc = functions:FindFirstChild("PlaceBlock"), functions:FindFirstChild("CommitResize")
+    local fillFunc, moveFunc = functions:FindFirstChild("FillBlock"), functions:FindFirstChild("CommitMove")
+    local destroyFunc = functions:FindFirstChild("DestroyBlock")
+    if not (placeFunc and resizeFunc and moveFunc and destroyFunc) then showToast("missing server remotes", colorEliminarCard); return end
 
-    destroyNegatePreview()
+    negateBusy = true
+    task.spawn(function()
+        local okAll, err = pcall(function()
+            destroyNegatePreview()
+            -- 1) snapshot the cutters, then give the marked blocks their real colour back
+            local cutters, markedList = {}, {}
+            for _, c in ipairs(negateMarked) do
+                if c and c.Parent then
+                    markedList[#markedList+1] = c
+                    local cf, size = getBoundsOf(c)
+                    if validBox(cf, size) then cutters[#cutters+1] = {cf = cf, size = size, src = c} end
+                end
+            end
+            for _, c in ipairs(markedList) do negateRestore(c) end
+            local markedSet = {}; for _, c in ipairs(markedList) do markedSet[c] = true end
+            negateMarked = {}; negateMarkedSet = {}; negatePartsOf = {}; negateOriginal = {}
+            updateNegateCount()
+            negateMode = false
+            negateModeBtn.Text = "MARK MODE: OFF"; negateModeBtn.BackgroundColor3 = colorActivo
 
-    local negateBoxes={}; local markedSet={}
-    for _,obj in ipairs(negateMarked) do
-        markedSet[obj]=true
-        local _,_,bmin,bmax=getAABB(obj)
-        table.insert(negateBoxes,{min=bmin,max=bmax,source=obj})
-    end
-    local toDelete={}; local toRebuild={}; local processed={}; local rebuildKeys={}
-    for _,nbox in ipairs(negateBoxes) do
-        local region=Region3.new(nbox.min-Vector3.new(0.5,0.5,0.5),nbox.max+Vector3.new(0.5,0.5,0.5))
-        local parts=workspace:FindPartsInRegion3WithIgnoreList(region,{proxyPart,rotateProxy,negateProxy,lp.Character},500)
-        for _,part in ipairs(parts) do
-            local realTarget=getRealTarget(part)
-            if realTarget and not processed[realTarget] then
-                processed[realTarget]=true
-                local container,colorPart=getBlockInfo(realTarget)
-                if container then
-                    local _,_,bmin,bmax=getAABB(container)
-                    local overlapped=bmax.X>nbox.min.X+0.01 and bmin.X<nbox.max.X-0.01 and bmax.Y>nbox.min.Y+0.01 and bmin.Y<nbox.max.Y-0.01 and bmax.Z>nbox.min.Z+0.01 and bmin.Z<nbox.max.Z-0.01
-                    if overlapped then
-                        table.insert(toDelete,container)
-                        local shape=getShapeType(container)
-                        local brick=colorPart and colorPart.BrickColor or BrickColor.new("Medium stone grey")
-                        local material=colorPart and colorPart.Material or Enum.Material.SmoothPlastic
-                        local assetName=(container:IsA("Model") and container.Name) or (container.Parent and container.Parent.Name) or "Block"
-                        if shape=="cylinder" or shape=="sphere" then
-                            local voxels=voxelizeShapeAdaptive(container,negateBoxes,VOXEL_RESOLUTION)
-                            for _,v in ipairs(voxels) do
-                                local key=string.format("%.2f_%.2f_%.2f_%.2f_%.2f_%.2f",v.cf.Position.X,v.cf.Position.Y,v.cf.Position.Z,v.size.X,v.size.Y,v.size.Z)
-                                if not rebuildKeys[key] then rebuildKeys[key]=true; table.insert(toRebuild,{cf=v.cf,size=v.size,brickColor=brick,material=material,assetName="Block"}) end
-                            end
-                        else
-                            local remaining={{min=bmin,max=bmax}}
-                            for _,nbox2 in ipairs(negateBoxes) do
-                                local newRemaining={}
-                                for _,piece in ipairs(remaining) do
-                                    local o=piece.max.X>nbox2.min.X+0.01 and piece.min.X<nbox2.max.X-0.01 and piece.max.Y>nbox2.min.Y+0.01 and piece.min.Y<nbox2.max.Y-0.01 and piece.max.Z>nbox2.min.Z+0.01 and piece.min.Z<nbox2.max.Z-0.01
-                                    if o then
-                                        local split=splitBoxByBox(piece.min,piece.max,nbox2.min,nbox2.max)
-                                        for _,s in ipairs(split) do table.insert(newRemaining,s) end
-                                    else table.insert(newRemaining,piece) end
-                                end
-                                remaining=newRemaining
-                            end
-                            for _,piece in ipairs(remaining) do
-                                local pc=(piece.min+piece.max)/2; local ps=piece.max-piece.min
-                                if ps.X>0.05 and ps.Y>0.05 and ps.Z>0.05 then
-                                    local key=string.format("%.2f_%.2f_%.2f_%.2f_%.2f_%.2f",pc.X,pc.Y,pc.Z,ps.X,ps.Y,ps.Z)
-                                    if not rebuildKeys[key] then rebuildKeys[key]=true; table.insert(toRebuild,{cf=CFrame.new(pc),size=ps,brickColor=brick,material=material,assetName=assetName}) end
-                                end
-                            end
+            -- 2) find every block touched by a cutter (never players / non-blocks)
+            local op = OverlapParams.new()
+            op.FilterType = Enum.RaycastFilterType.Exclude
+            op.FilterDescendantsInstances = getIgnoreList()
+            op.MaxParts = 3000
+            local candidates, seen = {}, {}
+            for _, cu in ipairs(cutters) do
+                local ok, parts = pcall(function() return workspace:GetPartBoundsInBox(cu.cf, cu.size + Vector3.new(0.2,0.2,0.2), op) end)
+                if ok and parts then
+                    for _, part in ipairs(parts) do
+                        local container = resolveNegatable(part)
+                        if container and not seen[container] and not markedSet[container] then
+                            seen[container] = true
+                            candidates[#candidates+1] = container
                         end
                     end
                 end
             end
-        end
-    end
-    for _,obj in ipairs(toDelete) do pcall(function() destroyFunc:InvokeServer(obj) end) end
-    for _,obj in ipairs(negateMarked) do if not processed[obj] then pcall(function() destroyFunc:InvokeServer(obj) end) end end
-    task.wait(0.15)
-    for _,obj in ipairs(toDelete) do pcall(function() destroyFunc:InvokeServer(obj) end) end
-    local total=#toRebuild
-    task.spawn(function()
-        for i,b in ipairs(toRebuild) do
-            negateProgressText.Text="rebuilding: "..i.."/"..total
-            local tempCF=b.cf+Vector3.new(math.random(100,500),100,math.random(100,500))
-            local assetToPlace=findOriginalAsset(b.assetName) or safeBlockPath("Blocks","Basic","Block","Block")
-            local ok,newBlock=pcall(function() return placeFunc:InvokeServer(assetToPlace,tempCF,b.brickColor,b.material) end)
-            if ok and newBlock then
-                invokeResize(newBlock,tempCF,b.size)
-                if fillFunc then pcall(function() fillFunc:InvokeServer(newBlock,b.brickColor,b.material) end) end
-                pcall(function() moveFunc:InvokeServer(newBlock,b.cf) end)
+
+            -- 3) compute what is left of each touched block (local-space maths => rotation preserved)
+            local jobs, skippedWedge, cappedCount = {}, 0, 0
+            for _, container in ipairs(candidates) do
+                local tcf, tsize = getBoundsOf(container)
+                if validBox(tcf, tsize) then
+                    local pieces, status = computePiecesForTarget(container, tcf, tsize, cutters)
+                    if pieces then
+                        local vp = getVisualPart(container)
+                        local assetName = (container:IsA("Model") and container.Name) or (container.Parent and container.Parent.Name) or "Block"
+                        jobs[#jobs+1] = {
+                            container = container, pieces = pieces,
+                            brick = vp and vp.BrickColor or BrickColor.new("Medium stone grey"),
+                            material = vp and vp.Material or Enum.Material.SmoothPlastic,
+                            assetName = assetName,
+                        }
+                        if status == "capped" then cappedCount = cappedCount + 1 end
+                    elseif status == "wedge" then skippedWedge = skippedWedge + 1 end
+                end
             end
-            task.wait(fastBuild and 0.01 or 0.03)
+
+            -- 4) delete originals and CONFIRM they are gone (otherwise no rebuild => no duplicates)
+            local function tryDestroy(list)
+                for _, o in ipairs(list) do if o and o.Parent then pcall(function() destroyFunc:InvokeServer(o) end) end end
+            end
+            local allTargets = {}
+            for _, c in ipairs(markedList) do allTargets[#allTargets+1] = c end
+            for _, j in ipairs(jobs) do allTargets[#allTargets+1] = j.container end
+            tryDestroy(allTargets); task.wait(0.2)
+            local survivors = {}
+            for _, o in ipairs(allTargets) do if o.Parent then survivors[#survivors+1] = o end end
+            if #survivors > 0 then tryDestroy(survivors); task.wait(0.25) end
+            local failed = 0
+            local goodJobs = {}
+            for _, j in ipairs(jobs) do
+                if j.container.Parent then failed = failed + 1 else goodJobs[#goodJobs+1] = j end
+            end
+            for _, c in ipairs(markedList) do if c.Parent then failed = failed + 1 end end
+
+            -- 5) rebuild the remaining pieces with their exact CFrame (position + rotation)
+            local total = 0
+            for _, j in ipairs(goodJobs) do total = total + #j.pieces end
+            local done, bad = 0, 0
+            for _, j in ipairs(goodJobs) do
+                local asset
+                for _, pc in ipairs(j.pieces) do
+                    done = done + 1
+                    negateProgressText.Text = "rebuilding: "..done.."/"..total
+                    local assetToPlace
+                    if pc.voxel then assetToPlace = findOriginalAsset("Block")
+                    else assetToPlace = findOriginalAsset(j.assetName) end
+                    assetToPlace = assetToPlace or safeBlockPath("Blocks","Basic","Block","Block")
+                    local tempCF = pc.cf + Vector3.new(math.random(100,500), 100, math.random(100,500))
+                    local ok, newBlock = pcall(function() return placeFunc:InvokeServer(assetToPlace, tempCF, j.brick, j.material) end)
+                    if ok and newBlock then
+                        invokeResize(newBlock, tempCF, pc.size)
+                        task.wait(0.03)
+                        local vis = getVisualPart(newBlock)
+                        if vis and (getObjSize(newBlock) - pc.size).Magnitude > 0.06 then invokeResizeVerified(newBlock, tempCF, pc.size) end
+                        if fillFunc then pcall(function() fillFunc:InvokeServer(newBlock, j.brick, j.material) end) end
+                        pcall(function() moveFunc:InvokeServer(newBlock, pc.cf) end)
+                        task.wait(0.03)
+                        if not poseOk(newBlock, pc.cf) then
+                            pcall(function() moveFunc:InvokeServer(newBlock, pc.cf) end)
+                            task.wait(0.05)
+                            if not poseOk(newBlock, pc.cf) then bad = bad + 1 end
+                        end
+                    else bad = bad + 1 end
+                    task.wait(fastBuild and 0.01 or 0.03)
+                end
+            end
+            negateProgressText.Text = "done! ("..total.." pieces)"
+            if failed > 0 then showToast(failed.." block(s) could not be deleted (no permission?)", colorEliminarCard) end
+            if skippedWedge > 0 then showToast(skippedWedge.." wedge(s) skipped (can't be cut)", colorInfo) end
+            if cappedCount > 0 then showToast("some shapes hit the piece limit (cut is rougher)", colorInfo) end
+            if bad > 0 then showToast(bad.." piece(s) were placed imperfectly", colorEliminarCard) end
+            task.wait(2); negateProgressText.Text = ""
+        end)
+        if not okAll then
+            warn("[PAT] negate error: "..tostring(err))
+            showToast("negate error - see console (F9)", colorEliminarCard)
+            negateProgressText.Text = ""
         end
-        negateProgressText.Text="done! ("..total.." pieces)"
-        task.wait(2); negateProgressText.Text=""
+        negateBusy = false
     end)
-    negateMarked={}; updateNegateCount()
-    negateMode=false
-    negateModeBtn.Text="MARK MODE: OFF"; negateModeBtn.BackgroundColor3=colorActivo
 end
 
 negateModeBtn.MouseButton1Click:Connect(function()
@@ -2174,10 +2498,14 @@ local function updateBoxFrameFromCorners(a, b)
     boxSelectFrame.Size     = UDim2.fromOffset(maxX - minX, maxY - minY)
 end
 
+-- MODIFICADO: OPTIMIZACIÓN EXTREMA, LÍMITE DE SELECCIÓN Y FILTRO ANTI-CRASH
 local _bsLastUpdate = 0
+local MAX_BOX_SELECT = 250
+
 local function updateLiveBoxSelect()
     local now = tick()
-    if now - _bsLastUpdate < 0.12 then return end
+    local throttle = IS_MOBILE and 0.25 or 0.15 
+    if now - _bsLastUpdate < throttle then return end
     _bsLastUpdate = now
 
     local minX = boxSelectFrame.AbsolutePosition.X
@@ -2189,13 +2517,16 @@ local function updateLiveBoxSelect()
     local newSel = {}
     local newTarget = nil
     local hitSet = {}
+    local count = 0
 
     local buildModel = workspace:FindFirstChild("BuildModel") or workspace
     
     for _, obj in ipairs(buildModel:GetDescendants()) do
+        if count >= MAX_BOX_SELECT then break end
+        
         if obj:IsA("Model") or obj:IsA("BasePart") then
             local isSelectable = true
-            if obj:FindFirstChildOfClass("Humanoid") then isSelectable = false end
+            if obj:FindFirstChildOfClass("Humanoid") or isPlayerObject(obj) then isSelectable = false end
             if obj.Name == "Baseplate" or obj:IsA("Terrain") then isSelectable = false end
             if obj:IsA("BasePart") and obj.Name == "MouseFilterPart" then isSelectable = false end
             if obj:IsA("BasePart") and obj.Name == "base" then isSelectable = false end
@@ -2211,39 +2542,51 @@ local function updateLiveBoxSelect()
                     cf, size = obj.CFrame, obj.Size
                 end
 
-                if cf and size then
-                    local intersects = false
-                    local corners = {
-                        cf * CFrame.new( size.X/2,  size.Y/2,  size.Z/2),
-                        cf * CFrame.new(-size.X/2,  size.Y/2,  size.Z/2),
-                        cf * CFrame.new( size.X/2, -size.Y/2,  size.Z/2),
-                        cf * CFrame.new( size.X/2,  size.Y/2, -size.Z/2),
-                        cf * CFrame.new(-size.X/2, -size.Y/2,  size.Z/2),
-                        cf * CFrame.new( size.X/2, -size.Y/2, -size.Z/2),
-                        cf * CFrame.new(-size.X/2,  size.Y/2, -size.Z/2),
-                        cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2),
-                        cf
-                    }
-                    for _, c in ipairs(corners) do
-                        local sp, onScreen = cam:WorldToViewportPoint(c.Position)
-                        if onScreen and sp.X >= minX and sp.X <= maxX and sp.Y >= minY and sp.Y <= maxY then
-                            intersects = true
-                            break
-                        end
-                    end
+                -- Filtro Anti-Crash para bloques de tamaño infinito o inválidos
+                if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
+                   and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
+                    
+                    -- Optimización: Revisar centro primero para no calcular 8 esquinas a lo pendejo
+                    local centerPos, centerOnScreen = cam:WorldToViewportPoint(cf.Position)
+                    if centerOnScreen and centerPos.X == centerPos.X and centerPos.Y == centerPos.Y then
+                        local margin = math.max(size.X, size.Y, size.Z) * 50
+                        if centerPos.X + margin > minX and centerPos.X - margin < maxX and centerPos.Y + margin > minY and centerPos.Y - margin < maxY then
+                            
+                            local intersects = false
+                            local corners = {
+                                cf * CFrame.new( size.X/2,  size.Y/2,  size.Z/2),
+                                cf * CFrame.new(-size.X/2,  size.Y/2,  size.Z/2),
+                                cf * CFrame.new( size.X/2, -size.Y/2,  size.Z/2),
+                                cf * CFrame.new( size.X/2,  size.Y/2, -size.Z/2),
+                                cf * CFrame.new(-size.X/2, -size.Y/2,  size.Z/2),
+                                cf * CFrame.new( size.X/2, -size.Y/2, -size.Z/2),
+                                cf * CFrame.new(-size.X/2,  size.Y/2, -size.Z/2),
+                                cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2),
+                                cf
+                            }
+                            for _, c in ipairs(corners) do
+                                local sp, onScreen = cam:WorldToViewportPoint(c.Position)
+                                if onScreen and sp.X == sp.X and sp.Y == sp.Y and sp.X >= minX and sp.X <= maxX and sp.Y >= minY and sp.Y <= maxY then
+                                    intersects = true
+                                    break
+                                end
+                            end
 
-                    if intersects then
-                        local realT = nil
-                        if obj:IsA("Model") then
-                            realT = obj
-                        else
-                            realT = getRealTarget(obj)
-                        end
+                            if intersects then
+                                local realT = nil
+                                if obj:IsA("Model") then
+                                    realT = obj
+                                else
+                                    realT = getRealTarget(obj)
+                                end
 
-                        if realT and not hitSet[realT] then
-                            hitSet[realT] = true
-                            table.insert(newSel, realT)
-                            newTarget = realT
+                                if realT and not hitSet[realT] then
+                                    hitSet[realT] = true
+                                    table.insert(newSel, realT)
+                                    newTarget = realT
+                                    count = count + 1
+                                end
+                            end
                         end
                     end
                 end
@@ -2379,7 +2722,7 @@ scroll.ScrollBarThickness=10; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; s
 
 function killUI()
     pcall(function() local env=(getgenv and getgenv()) or _G; if env.PAT_CLEANUP then env.PAT_CLEANUP() end end)
-    unlockCamera(); destroyNegatePreview(); MainUI:Destroy()
+    unlockCamera(); pcall(clearNegateMarks); pcall(destroyNegatePreview); MainUI:Destroy()
     pcall(function() ModalUI:Destroy() end)
     pcall(function() TopUI:Destroy() end)
     pcall(function() coordsGui:Destroy() end)
@@ -2657,8 +3000,7 @@ textPanel=nil; closeTextPanelFn=nil
 function isSelectableHit(inst)
     if not inst then return false end
     if inst:IsA("Terrain") then return false end
-    local model=inst:FindFirstAncestorOfClass("Model")
-    if model and model:FindFirstChildOfClass("Humanoid") then return false end
+    if isPlayerObject(inst) then return false end
     return true
 end
 
@@ -2701,7 +3043,7 @@ function raycastFromScreen(pos)
     local ray=inputRay(pos)
     local params=RaycastParams.new()
     params.FilterType=Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances={lp.Character,proxyPart,rotateProxy,negateProxy,globalMoveProxy}
+    params.FilterDescendantsInstances=getIgnoreList()
     return workspace:Raycast(ray.Origin,ray.Direction*1000,params)
 end
 
@@ -2721,7 +3063,7 @@ createTool(iconIds.select,function()
         local center=Vector2.new(cam.ViewportSize.X/2,cam.ViewportSize.Y/2)
         local unitRay=cam:ViewportPointToRay(center.X,center.Y)
         local params=RaycastParams.new()
-        params.FilterDescendantsInstances={lp.Character,proxyPart,rotateProxy,negateProxy,globalMoveProxy}
+        params.FilterDescendantsInstances=getIgnoreList()
         params.FilterType=Enum.RaycastFilterType.Exclude
         local result=workspace:Raycast(unitRay.Origin,unitRay.Direction*1000,params)
         if result and result.Instance and isSelectableHit(result.Instance) then
@@ -2735,8 +3077,7 @@ track(Services.UserInput.InputBegan:Connect(function(input,processed)
     if negateMode and (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) then
         local result=raycastFromScreen(input.Position)
         if result and result.Instance then
-            local realTarget=getRealTarget(result.Instance)
-            if realTarget then markNegate(realTarget); playUISound() end
+            toggleNegate(result.Instance); playUISound()
         end
         return
     end
