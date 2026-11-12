@@ -1,4 +1,3 @@
--- GAME DETECTION — runs BEFORE anything else loads
 do
     local _lp = game:GetService("Players").LocalPlayer
     local _rep = game:GetService("ReplicatedStorage")
@@ -150,6 +149,242 @@ mouse = lp:GetMouse()
 cam = workspace.CurrentCamera
 discordLink = "https://discord.gg/XwHMgsQdV"
 
+local BaseAdornment = {}
+BaseAdornment.__index = BaseAdornment
+function BaseAdornment.new()
+    local v2 = {
+        _Adornee = nil,
+        _Transparency = 0,
+        _Thickness = 0.1,
+        _Color = Color3.new(),
+        _Handles = {},
+        _Instance = Instance.new("Folder")
+    }
+    v2._Instance.Name = "Adornment"
+    return setmetatable(v2, BaseAdornment)
+end
+
+function BaseAdornment:SetParent(p5) self._Instance.Parent = p5 end
+function BaseAdornment:GetParent() return self._Instance.Parent end
+function BaseAdornment:SetThickness(p8) self._Thickness = p8; self:_AdorneeChanged() end
+function BaseAdornment:GetThickness() return self._Thickness end
+function BaseAdornment:SetTransparency(p11)
+    for _, v12 in self._Handles do v12.Transparency = p11 end
+    self._Transparency = p11
+end
+function BaseAdornment:GetTransparency() return self._Transparency end
+function BaseAdornment:SetColor(p15)
+    for _, v16 in self._Handles do v16.Color3 = p15 end
+    self._Color = p15
+end
+function BaseAdornment:GetColor() return self._Color end
+function BaseAdornment:SetAdornee(p19)
+    assert(p19 == nil or typeof(p19) == "Instance" and p19:IsA("PVInstance"), "Adornee must be PVInstance or nil")
+    self._Adornee = p19
+    self:_AdorneeChanged()
+    for _, v21 in self._Handles do v21.Adornee = p19 end
+end
+function BaseAdornment:GetAdornee() return self._Adornee end
+function BaseAdornment:_AdorneeChanged() end
+function BaseAdornment:Render() end
+function BaseAdornment:Destroy()
+    for _, v24 in self._Handles do v24:Destroy() end
+    self._Instance:Destroy()
+end
+
+handleColorPalette = "Roblox Studio"
+
+local function getArrowColor(face)
+    if handleColorPalette == "Roblox Studio" then
+        if face == Enum.NormalId.Right or face == Enum.NormalId.Left then return Color3.new(1, 0, 0)
+        elseif face == Enum.NormalId.Top or face == Enum.NormalId.Bottom then return Color3.new(0, 1, 0)
+        else return Color3.new(0, 0, 1) end
+    else
+        return Color3.fromRGB(0, 0, 255)
+    end
+end
+
+local function getResizeColor(dir)
+    if handleColorPalette == "Roblox Studio" then
+        if math.abs(dir.X) > 0.5 then return Color3.new(1, 0, 0)
+        elseif math.abs(dir.Y) > 0.5 then return Color3.new(0, 1, 0)
+        else return Color3.new(0, 0, 1) end
+    else
+        return Color3.fromRGB(255, 128, 0)
+    end
+end
+
+local ArrowDragger = {}
+ArrowDragger.__index = ArrowDragger
+setmetatable(ArrowDragger, BaseAdornment)
+
+local function computeDraggedDistance(p5, p6, p7)
+    local v8 = p7.Origin
+    local v9 = p7.Direction.Unit
+    local v10 = p6:Cross((v8 - p5).Unit)
+    if v10:Dot(v10) < 0.0001 then return false end
+    local v11 = p6:Cross(v10).Unit
+    if v9:Dot(v11) < 0.0001 then return false end
+    return true, (v8 + (p5 - v8):Dot(v11) / v9:Dot(v11) * v9 - p5):Dot(p6)
+end
+
+local v_u_13 = { None = 0, Hovering = 1, Dragging = 2 }
+local v_u_14 = {
+    None = { Scale = 0.4, Transparency = 0.5 },
+    Hovering = { Scale = 0.6, Transparency = 0.4 },
+    Dragging = { Scale = 0.5, Transparency = 0.2 }
+}
+Services.UserInput.LastInputTypeChanged:Connect(function(p15)
+    if p15 == Enum.UserInputType.Touch then
+        v_u_14.None.Scale = 1; v_u_14.Hovering.Scale = 1.2; v_u_14.Dragging.Scale = 1.1
+    elseif p15 == Enum.UserInputType.MouseMovement then
+        v_u_14.None.Scale = 0.4; v_u_14.Hovering.Scale = 0.6; v_u_14.Dragging.Scale = 0.5
+    elseif p15 == Enum.UserInputType.Gamepad1 then
+        v_u_14.None.Scale = 1.5; v_u_14.Hovering.Scale = 1.7; v_u_14.Dragging.Scale = 1.6
+    end
+end)
+
+local function updateHandles(p16)
+    local v17 = p16.mouseDown and v_u_13.Dragging or (p16.mouseHovering and v_u_13.Hovering or v_u_13.None)
+    local v18, v19 = p16.coneHandle, p16.cylinderHandle
+    if v17 == 0 then
+        v18.Transparency = v_u_14.None.Transparency; v19.Transparency = v_u_14.None.Transparency
+    elseif v17 == 2 then
+        v18.Transparency = v_u_14.Dragging.Transparency; v19.Transparency = v_u_14.Dragging.Transparency
+    elseif v17 == 1 then
+        v18.Transparency = v_u_14.Hovering.Transparency; v19.Transparency = v_u_14.Hovering.Transparency
+    end
+end
+
+function ArrowDragger.new(_)
+    local v_u_21 = BaseAdornment.new()
+    setmetatable(v_u_21, ArrowDragger)
+    local v_u_22, v_u_23, v_u_24 = Instance.new("BindableEvent"), Instance.new("BindableEvent"), Instance.new("BindableEvent")
+    v_u_21.MouseDrag = v_u_22.Event
+    v_u_21.MouseButton1Down = v_u_23.Event
+    v_u_21.MouseButton1Up = v_u_24.Event
+    v_u_21.IsDragging = false
+    v_u_21.Faces = Enum.NormalId:GetEnumItems()
+    local v_u_25 = {}
+    local v_u_26 = nil
+    
+    for v_u_27, v28 in Enum.NormalId:GetEnumItems() do
+        local v29 = Instance.new("ConeHandleAdornment")
+        v29.Parent = v_u_21._Instance; v29.ZIndex = 1; v29.AlwaysOnTop = true
+        local v30 = Instance.new("CylinderHandleAdornment")
+        v30.Parent = v_u_21._Instance; v30.ZIndex = 0; v30.AlwaysOnTop = true
+        
+        local c = getArrowColor(v28)
+        v29.Color3 = c
+        v30.Color3 = c
+        
+        local v_u_31 = Vector3.fromNormalId(v28)
+        local v_u_32 = { mouseHovering = false, mouseDown = false, cylinderHandle = v30, coneHandle = v29, direction = v_u_31, face = v28.Name, scale = v_u_14.None.Scale }
+        v_u_25[v_u_27] = v_u_32
+        updateHandles(v_u_32)
+        
+        for _, v_u_33 in { v29, v30 } do
+            v_u_33.MouseEnter:Connect(function() if v_u_21._Adornee then v_u_32.mouseHovering = true; updateHandles(v_u_25[v_u_27]) end end)
+            v_u_33.MouseLeave:Connect(function() if v_u_21._Adornee then v_u_32.mouseHovering = false; updateHandles(v_u_25[v_u_27]) end end)
+            v_u_33.MouseButton1Down:Connect(function()
+                if v_u_21._Adornee then
+                    v_u_21._PreviousCameraType = workspace.CurrentCamera.CameraType
+                    v_u_32.mouseDown = true
+                    updateHandles(v_u_25[v_u_27])
+                    v_u_23:Fire(v_u_31)
+                    v_u_21.IsDragging = true
+                    if v_u_26 == nil then
+                        local v_u_34 = v_u_33.CFrame
+                        local v35 = v_u_21._Adornee
+                        local v_u_36
+                        if v35:IsA("BasePart") then v_u_36 = v35:GetPivot()
+                        elseif v35:IsA("Model") then v_u_36 = v35:GetBoundingBox() end
+                        v_u_26 = Services.UserInput.InputChanged:Connect(function(p38)
+                            if p38.UserInputType == Enum.UserInputType.MouseMovement or p38.UserInputType == Enum.UserInputType.Touch then
+                                local v39 = v_u_36.Rotation:VectorToWorldSpace(v_u_31)
+                                local v40 = Services.UserInput:GetMouseLocation()
+                                local v41 = workspace.CurrentCamera:ViewportPointToRay(v40.X, v40.Y).Unit
+                                local v42 = Ray.new(v41.Origin, v41.Direction * 10000)
+                                local v43, v44 = computeDraggedDistance(v_u_36.Position, v39, v42)
+                                if v43 then
+                                    v_u_22:Fire(v_u_31, v44 - v_u_34:ToObjectSpace(v_u_36).Position.Magnitude)
+                                    if p38.UserInputType == Enum.UserInputType.Touch then
+                                        workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                end
+            end)
+            table.insert(v_u_21._Handles, v_u_33)
+        end
+    end
+    
+    v_u_21._Connections = {
+        Services.UserInput.InputEnded:Connect(function(p46, _)
+            if p46.UserInputType == Enum.UserInputType.MouseButton1 or p46.UserInputType == Enum.UserInputType.Touch then
+                v_u_21.IsDragging = false
+                for v47, v48 in v_u_25 do
+                    if v48.mouseDown then
+                        v48.mouseDown = false
+                        updateHandles(v_u_25[v47])
+                        v_u_24:Fire(v48.direction)
+                    end
+                end
+                if v_u_21._PreviousCameraType then workspace.CurrentCamera.CameraType = v_u_21._PreviousCameraType end
+                if v_u_26 then v_u_26:Disconnect(); v_u_26 = nil end
+            end
+        end),
+        Services.Run.RenderStepped:Connect(function()
+            if v_u_21._Adornee then
+                local v49 = v_u_21._Adornee
+                local v50, v51
+                if v49:IsA("BasePart") then v50 = v49:GetPivot(); v51 = v49.Size
+                elseif v49:IsA("Model") then v50, v51 = v49:GetBoundingBox() end
+                local v52 = v51 + Vector3.new(1, 1, 1)
+                for _, v53 in v_u_25 do
+                    local v54 = v53.coneHandle.CFrame.Position
+                    local v55 = (workspace.CurrentCamera.CFrame.Position - v54).Magnitude
+                    local v56 = workspace.CurrentCamera.FieldOfView
+                    local v57 = math.rad(v56)
+                    local v58 = math.sin(v57) * v55 * 0.05
+                    for _, v59 in { v53.coneHandle, v53.cylinderHandle } do
+                        v59.Visible = table.find(v_u_21.Faces, Enum.NormalId[v53.face]) ~= nil
+                        local v60 = v53.direction
+                        v59.Adornee = workspace.Terrain
+                        local v61
+                        if v59:IsA("ConeHandleAdornment") then
+                            v59.Radius = v53.scale * v58; v59.Height = v59.Radius * 4
+                            v61 = v60 * v52 * 0.5 + v60 * v58 + v60 * (v53.scale * v58 * 3)
+                        else
+                            v53.cylinderHandle.Radius = v53.scale * v58 * 0.5; v53.cylinderHandle.Height = v53.scale * v58 * 6
+                            v61 = v60 * v52 * 0.5 + v60 * v58
+                        end
+                        v59.CFrame = v50 * CFrame.lookAt(v61, v61 + v60, Vector3.new(0, 1, 0))
+                    end
+                    updateHandles(v53)
+                end
+            else
+                for _, v62 in v_u_21._Handles do v62.Adornee = nil end
+            end
+        end)
+    }
+    return v_u_21
+end
+
+function ArrowDragger:SetAdornee(p65)
+    if p65 == nil or (typeof(p65) == "Instance" and p65:IsA("PVInstance")) then
+        self._Adornee = p65
+        self:_AdorneeChanged()
+    end
+end
+
+function ArrowDragger:Destroy()
+    BaseAdornment.Destroy(self)
+    for _, v68 in self._Connections do v68:Disconnect() end
+end
+
 do
     local env = (getgenv and getgenv()) or _G
     if env.PAT_CLEANUP then pcall(env.PAT_CLEANUP) end
@@ -219,13 +454,13 @@ VOXEL_RESOLUTION_HIGH = 16
 
 uiSoundEnabled = true
 showOutline = true
-showCrosshair = not IS_TOUCH_DEVICE
+showCrosshair = true
 autoResizeOnConvert = true
 autoSelectAfterCopy = false
 alwaysSnap = false
 showCoords = false
-fastBuild = false
-maxUndo = 30
+fastBuild = true
+maxUndo = 200
 uiOpacity = 1.0
 handleScaleMul = 1.0
 lockCamOnDrag = true
@@ -416,14 +651,12 @@ function restoreTransparencies()
     end
 end
 
--- MODIFICADO: PROTECCIÓN CONTRA NaN / TAMAÑOS INFINITOS
 function updateProxy()
     pruneSelection()
     if #selectedObjects == 0 then proxyPart.CFrame = CFrame.new(0, 10000, 0); return end
     if #selectedObjects == 1 then
         local obj = selectedObjects[1]
         local cf, size = getBoundsOf(obj)
-        -- Validación anti-crash
         if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
            and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
             proxyPart.Size = size; proxyPart.CFrame = cf; return
@@ -440,7 +673,6 @@ function updateProxy()
         if obj:IsA("Model") then cf, size = getModelVisualBox(obj)
         elseif obj:IsA("BasePart") then cf, size = obj.CFrame, obj.Size end
         
-        -- Validación anti-crash
         if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
            and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
             validCount = validCount + 1
@@ -494,7 +726,7 @@ function syncFilter(target)
     end
 end
 
-local moveTimestamps = setmetatable({}, {__mode="k"})
+local moveTimestamps = {}
 
 function forceUpdate(target, mode)
     if not target then return end
@@ -508,12 +740,9 @@ function forceUpdate(target, mode)
             local expectedCF = container:GetPivot()
             local originalCF = container:GetAttribute("PAT_LastCF") or expectedCF
             container:SetAttribute("PAT_LastCF", expectedCF)
-            
             pcall(function() commitMove:InvokeServer(container, expectedCF) end) 
-            
             local currentTimestamp = tick()
             moveTimestamps[container] = currentTimestamp
-            
             task.delay(0.6, function()
                 if container and container.Parent and moveTimestamps[container] == currentTimestamp then
                     local actualCF = container:GetPivot()
@@ -530,7 +759,6 @@ function forceUpdate(target, mode)
             local expectedSize = finalSize
             local currentTimestamp = tick()
             moveTimestamps[container] = currentTimestamp
-            
             task.delay(0.6, function()
                 if container and container.Parent and moveTimestamps[container] == currentTimestamp then
                     local actualSize = getObjSize(container)
@@ -620,7 +848,6 @@ function playUISound()
     if uiSoundEnabled then uiSound:Play() end
 end
 
--- TOAST NOTIFICATION SYSTEM
 local toastGui = Instance.new("Frame", MainUI)
 toastGui.Name = "ToastContainer"
 toastGui.Size = UDim2.new(1, 0, 0, 100)
@@ -720,7 +947,7 @@ lastMirrorTick = 0
 activeHandle = nil
 activeIsRot = false
 activeReset = nil
-tapRecords = setmetatable({}, {__mode="k"})
+tapRecords = {}
 
 colorActivo         = Color3.fromHex("FF6B6B")
 colorInactivo       = Color3.fromHex("D96B6B")
@@ -980,7 +1207,7 @@ track(Services.Run.RenderStepped:Connect(function()
             local rel=pcf:ToObjectSpace(CFrame.new(worldPos+outDir*scaleFactor*0.4))
             local scaleAttr=(h:GetAttribute("CurrentScale") or 0.4)
             h.Adornee=proxyPart; h.Visible=true
-            h.Color3=currentMode=="scale" and toolColors.scale or toolColors.mirror
+            h.Color3 = getResizeColor(dir)
             h.CFrame=rel; h.Radius=scaleAttr*scaleFactor
             if hh then hh.Adornee=proxyPart; hh.Visible=true; hh.CFrame=rel; hh.Radius=(IS_MOBILE and 1.1 or 0.7)*scaleFactor end
         else
@@ -1132,7 +1359,6 @@ editorToggleBtn.Font = Enum.Font.GothamBold
 editorToggleBtn.TextSize = IS_MOBILE and 18 or 18
 Instance.new("UICorner",editorToggleBtn).CornerRadius = UDim.new(0,8)
 
--- CONTENEDOR CON LISTA PARA EVITAR SUPERPOSICIONES
 local infoContent = Instance.new("Frame", infoPanel)
 infoContent.Name = "Content"
 infoContent.Size = UDim2.new(1, 0, 1, 0)
@@ -1368,110 +1594,47 @@ negateProgressText.Font=Enum.Font.Gotham; negateProgressText.TextSize=IS_MOBILE 
 negatePreviewEnabled = false
 negatePreviewParts   = {}
 
--- ============================================================
--- NEGATE TOOL v2 : helpers (marking is LOCAL only, originals restored on clear)
--- ============================================================
-negatePreviewFolder = Instance.new("Folder")
-negatePreviewFolder.Name = "PAT_NegPreview"
-negatePreviewFolder.Parent = workspace:FindFirstChild("Terrain") or workspace
-trackInst(negatePreviewFolder)
-
-negateOriginal  = {}   -- [BasePart] = {Color=, Transparency=}
-negatePartsOf   = {}   -- [container] = {BasePart,...}
-negateMarkedSet = {}   -- [container] = true
-negateBusy      = false
-
-function validBox(cf, size)
-    return cf ~= nil and size ~= nil
-        and size.X == size.X and size.Y == size.Y and size.Z == size.Z
-        and size.X > 0 and size.Y > 0 and size.Z > 0
-        and size.X < 1e5 and size.Y < 1e5 and size.Z < 1e5
-        and cf.Position.X == cf.Position.X and cf.Position.Y == cf.Position.Y and cf.Position.Z == cf.Position.Z
-end
-
--- True for players' characters and any NPC (Model with Humanoid)
-function isPlayerObject(inst)
-    if not inst then return false end
-    for _, pl in ipairs(Services.Players:GetPlayers()) do
-        local ch = pl.Character
-        if ch and (inst == ch or inst:IsDescendantOf(ch)) then return true end
+local function destroyNegatePreview()
+    for _, entry in ipairs(negatePreviewParts) do
+        pcall(function() entry.previewPart:Destroy() end)
     end
-    local cur = inst
-    while cur and cur ~= workspace and cur ~= game do
-        if cur:IsA("Model") and cur:FindFirstChildOfClass("Humanoid") then return true end
-        cur = cur.Parent
-    end
-    return false
+    negatePreviewParts = {}
 end
 
-function getIgnoreList()
-    local list = {proxyPart, rotateProxy, negateProxy, globalMoveProxy, negatePreviewFolder}
-    for _, pl in ipairs(Services.Players:GetPlayers()) do
-        if pl.Character then list[#list+1] = pl.Character end
-    end
-    return list
-end
-
--- Block = Model that has a ColorPart (any depth). Fallback: plain part inside workspace.BuildModel
-function resolveBlock(inst)
-    local cur = inst
-    while cur and cur ~= workspace and cur ~= game do
-        if cur:IsA("Model") and cur:FindFirstChild("ColorPart") then return cur end
-        cur = cur.Parent
-    end
-    return nil
-end
-
-function resolveNegatable(inst)
-    if not inst or not inst.Parent then return nil end
-    if inst:IsA("Terrain") or isPlayerObject(inst) then return nil end
-    if inst.Name:sub(1,4) == "PAT_" or inst.Name:sub(1,4) == "T3D_" or inst.Name:sub(1,9) == "ArchPrev_" then return nil end
-    local block = resolveBlock(inst)
-    if block then return block end
-    local root = workspace:FindFirstChild("BuildModel")
-    if root and inst:IsA("BasePart") and inst:IsDescendantOf(root) then return inst end
-    return nil
-end
-
-function negateVisualParts(container, includeInvisible)
-    local out = {}
-    if container:IsA("BasePart") then
-        out[1] = container
-    else
-        for _, d in ipairs(container:GetDescendants()) do
-            if d:IsA("BasePart") and d.Name ~= "MouseFilterPart" and d.Name ~= "base" then out[#out+1] = d end
-        end
-    end
-    if not includeInvisible then
-        for i = #out, 1, -1 do if out[i].Transparency >= 1 then table.remove(out, i) end end
-    end
-    return out
-end
-
-function destroyNegatePreview()
-    pcall(function() negatePreviewFolder:ClearAllChildren() end)
-end
-
-function buildNegatePreview()
+local function buildNegatePreview()
     destroyNegatePreview()
-    if not negatePreviewEnabled then return end
-    for _, container in ipairs(negateMarked) do
-        if container and container.Parent then
-            for _, part in ipairs(negateVisualParts(container, true)) do
-                pcall(function()
-                    local pp = Instance.new("Part")
-                    pp.Name = "PAT_NegPreview"
-                    pp.Size = part.Size + Vector3.new(0.03, 0.03, 0.03)
-                    pp.CFrame = part.CFrame
-                    pp.Anchored = true; pp.CanCollide = false; pp.CanQuery = false; pp.CanTouch = false
-                    pp.Transparency = 0.45
-                    pp.Color = Color3.fromRGB(255, 30, 30)
-                    pp.Material = Enum.Material.Neon
-                    pp.CastShadow = false
-                    pp.Parent = negatePreviewFolder
-                end)
+    if not negatePreviewEnabled or #negateMarked == 0 then return end
+    for _, obj in ipairs(negateMarked) do
+        pcall(function()
+            local previewParts = {}
+            if obj:IsA("Model") then
+                for _, c in ipairs(obj:GetDescendants()) do
+                    if c:IsA("BasePart") then
+                        local pp = Instance.new("Part")
+                        pp.Name = "PAT_NegPreview"
+                        pp.Size = c.Size; pp.CFrame = c.CFrame
+                        pp.Anchored = true; pp.CanCollide = false; pp.CanQuery = false
+                        pp.Transparency = 0.45
+                        pp.Color = Color3.fromRGB(255,30,30)
+                        pp.Material = Enum.Material.Neon
+                        pp.CastShadow = false
+                        pp.Parent = workspace
+                        table.insert(negatePreviewParts, {previewPart=pp})
+                    end
+                end
+            elseif obj:IsA("BasePart") then
+                local pp = Instance.new("Part")
+                pp.Name = "PAT_NegPreview"
+                pp.Size = obj.Size; pp.CFrame = obj.CFrame
+                pp.Anchored = true; pp.CanCollide = false; pp.CanQuery = false
+                pp.Transparency = 0.45
+                pp.Color = Color3.fromRGB(255,30,30)
+                pp.Material = Enum.Material.Neon
+                pp.CastShadow = false
+                pp.Parent = workspace
+                table.insert(negatePreviewParts, {previewPart=pp})
             end
-        end
+        end)
     end
 end
 
@@ -1483,83 +1646,37 @@ negatePreviewBtn.MouseButton1Click:Connect(function()
     if negatePreviewEnabled then buildNegatePreview() else destroyNegatePreview() end
 end)
 
-function negatePaint(container)
-    local list = {}
-    for _, p in ipairs(negateVisualParts(container, false)) do
-        if not negateOriginal[p] then negateOriginal[p] = {Color = p.Color, Transparency = p.Transparency} end
-        list[#list+1] = p
-        pcall(function()
-            p.Color = Color3.fromRGB(255, 40, 40)
-            p.Transparency = math.min(p.Transparency, 0.5)
-        end)
-    end
-    negatePartsOf[container] = list
-end
-
-function negateRestore(container)
-    local list = negatePartsOf[container]
-    if list then
-        for _, p in ipairs(list) do
-            local o = negateOriginal[p]
-            if o then
-                if p.Parent then pcall(function() p.Color = o.Color; p.Transparency = o.Transparency end) end
-                negateOriginal[p] = nil
-            end
-        end
-    end
-    negatePartsOf[container] = nil
-end
-
-function pruneNegate()
-    for i = #negateMarked, 1, -1 do
-        local c = negateMarked[i]
-        if not c or not c.Parent then
-            negateRestore(c); negateMarkedSet[c] = nil
-            table.remove(negateMarked, i)
-        end
-    end
-end
-
 function updateNegateCount()
-    pruneNegate()
     negateCountLabel.Text = "marked: "..tostring(#negateMarked)
     if negatePreviewEnabled then buildNegatePreview() end
 end
 
 function clearNegateMarks()
-    for _, c in ipairs(negateMarked) do negateRestore(c) end
-    negateMarked = {}; negateMarkedSet = {}; negatePartsOf = {}
-    for p, o in pairs(negateOriginal) do   -- safety net: restore anything left over
-        if p and p.Parent then pcall(function() p.Color = o.Color; p.Transparency = o.Transparency end) end
-    end
-    negateOriginal = {}
     destroyNegatePreview()
+    for _, obj in ipairs(negateMarked) do
+        pcall(function()
+            if obj:IsA("Model") then
+                for _, c in ipairs(obj:GetDescendants()) do
+                    if c:IsA("BasePart") then c.Transparency=0 end
+                end
+            elseif obj:IsA("BasePart") then obj.Transparency=0 end
+        end)
+    end
+    negateMarked={}
     updateNegateCount()
 end
 
 function markNegate(obj)
-    local container = resolveNegatable(obj)
-    if not container or negateMarkedSet[container] then return false end
-    negateMarkedSet[container] = true
-    table.insert(negateMarked, container)
-    negatePaint(container)
+    for _, v in ipairs(negateMarked) do if v==obj then return end end
+    table.insert(negateMarked, obj)
+    pcall(function()
+        if obj:IsA("Model") then
+            for _,c in ipairs(obj:GetDescendants()) do
+                if c:IsA("BasePart") then c.Transparency=0.6; c.Color=Color3.fromRGB(255,40,40) end
+            end
+        elseif obj:IsA("BasePart") then obj.Transparency=0.6; obj.Color=Color3.fromRGB(255,40,40) end
+    end)
     updateNegateCount()
-    return true
-end
-
-function unmarkNegate(container)
-    if not negateMarkedSet[container] then return end
-    negateRestore(container)
-    negateMarkedSet[container] = nil
-    for i, c in ipairs(negateMarked) do if c == container then table.remove(negateMarked, i); break end end
-    updateNegateCount()
-end
-
--- click on a block: mark it; click again: unmark it
-function toggleNegate(inst)
-    local container = resolveNegatable(inst)
-    if not container then showToast("not a block (or a player) - ignored", colorInfo); return end
-    if negateMarkedSet[container] then unmarkNegate(container) else markNegate(container) end
 end
 
 function getRealTarget(hit)
@@ -1585,392 +1702,197 @@ function getBlockInfo(target)
     return container, colorPart
 end
 
--- ============================================================
--- NEGATE TOOL v2 : geometry (everything is computed in the TARGET'S LOCAL SPACE,
--- so rotated blocks keep their exact rotation after being cut)
--- ============================================================
 function getAABB(target)
-    local cf, size = getBoundsOf(target)
-    return cf, size, cf.Position - size/2, cf.Position + size/2
+    if target:IsA("Model") then
+        local cf,size=getModelVisualBox(target)
+        return cf,size,cf.Position-size/2,cf.Position+size/2
+    else
+        local cf,size=target.CFrame,target.Size
+        return cf,size,cf.Position-size/2,cf.Position+size/2
+    end
 end
 
--- exact 3D box split (all values in the same axis-aligned space)
 function splitBoxByBox(blockMin, blockMax, cutMin, cutMax)
-    local intMin = Vector3.new(math.max(blockMin.X,cutMin.X), math.max(blockMin.Y,cutMin.Y), math.max(blockMin.Z,cutMin.Z))
-    local intMax = Vector3.new(math.min(blockMax.X,cutMax.X), math.min(blockMax.Y,cutMax.Y), math.min(blockMax.Z,cutMax.Z))
-    if intMin.X >= intMax.X-0.01 or intMin.Y >= intMax.Y-0.01 or intMin.Z >= intMax.Z-0.01 then
-        return {{min=blockMin, max=blockMax}}
+    local intMin=Vector3.new(math.max(blockMin.X,cutMin.X),math.max(blockMin.Y,cutMin.Y),math.max(blockMin.Z,cutMin.Z))
+    local intMax=Vector3.new(math.min(blockMax.X,cutMax.X),math.min(blockMax.Y,cutMax.Y),math.min(blockMax.Z,cutMax.Z))
+    if intMin.X>=intMax.X-0.01 or intMin.Y>=intMax.Y-0.01 or intMin.Z>=intMax.Z-0.01 then
+        return {{min=blockMin,max=blockMax}}
     end
-    local r = {}
-    if intMin.X > blockMin.X+0.01 then table.insert(r,{min=blockMin, max=Vector3.new(intMin.X,blockMax.Y,blockMax.Z)}) end
-    if intMax.X < blockMax.X-0.01 then table.insert(r,{min=Vector3.new(intMax.X,blockMin.Y,blockMin.Z), max=blockMax}) end
-    if intMin.Y > blockMin.Y+0.01 then table.insert(r,{min=Vector3.new(intMin.X,blockMin.Y,blockMin.Z), max=Vector3.new(intMax.X,intMin.Y,blockMax.Z)}) end
-    if intMax.Y < blockMax.Y-0.01 then table.insert(r,{min=Vector3.new(intMin.X,intMax.Y,blockMin.Z), max=Vector3.new(intMax.X,blockMax.Y,blockMax.Z)}) end
-    if intMin.Z > blockMin.Z+0.01 then table.insert(r,{min=Vector3.new(intMin.X,intMin.Y,blockMin.Z), max=Vector3.new(intMax.X,intMax.Y,intMin.Z)}) end
-    if intMax.Z < blockMax.Z-0.01 then table.insert(r,{min=Vector3.new(intMin.X,intMin.Y,intMax.Z), max=Vector3.new(intMax.X,intMax.Y,blockMax.Z)}) end
-    return r
+    local result={}
+    if intMin.X>blockMin.X+0.01 then table.insert(result,{min=blockMin,max=Vector3.new(intMin.X,blockMax.Y,blockMax.Z)}) end
+    if intMax.X<blockMax.X-0.01 then table.insert(result,{min=Vector3.new(intMax.X,blockMin.Y,blockMin.Z),max=blockMax}) end
+    if intMin.Y>blockMin.Y+0.01 then table.insert(result,{min=Vector3.new(intMin.X,blockMin.Y,blockMin.Z),max=Vector3.new(intMax.X,intMin.Y,blockMax.Z)}) end
+    if intMax.Y<blockMax.Y-0.01 then table.insert(result,{min=Vector3.new(intMin.X,intMax.Y,blockMin.Z),max=Vector3.new(intMax.X,blockMax.Y,blockMax.Z)}) end
+    if intMin.Z>blockMin.Z+0.01 then table.insert(result,{min=Vector3.new(intMin.X,intMin.Y,blockMin.Z),max=Vector3.new(intMax.X,intMax.Y,intMin.Z)}) end
+    if intMax.Z<blockMax.Z-0.01 then table.insert(result,{min=Vector3.new(intMin.X,intMin.Y,intMax.Z),max=Vector3.new(intMax.X,intMax.Y,blockMax.Z)}) end
+    return result
 end
 
--- oriented box vs oriented box (separating axis test). shrink => touching faces do NOT count
-function obbIntersect(cfA, sA, cfB, sB, shrink)
-    shrink = shrink or 0.01
-    local a = {sA.X/2-shrink, sA.Y/2-shrink, sA.Z/2-shrink}
-    local b = {sB.X/2-shrink, sB.Y/2-shrink, sB.Z/2-shrink}
-    local rel = cfA:ToObjectSpace(cfB)
-    local p = rel.Position; local t = {p.X, p.Y, p.Z}
-    local _,_,_,r11,r12,r13,r21,r22,r23,r31,r32,r33 = rel:GetComponents()
-    local R = {{r11,r12,r13},{r21,r22,r23},{r31,r32,r33}}
-    local AR = {}
-    for i = 1,3 do AR[i] = {}; for j = 1,3 do AR[i][j] = math.abs(R[i][j]) + 1e-6 end end
-    for i = 1,3 do
-        if math.abs(t[i]) > a[i] + b[1]*AR[i][1] + b[2]*AR[i][2] + b[3]*AR[i][3] then return false end
-    end
-    for j = 1,3 do
-        local d = math.abs(t[1]*R[1][j] + t[2]*R[2][j] + t[3]*R[3][j])
-        if d > a[1]*AR[1][j] + a[2]*AR[2][j] + a[3]*AR[3][j] + b[j] then return false end
-    end
-    for i = 1,3 do
-        local i1, i2 = i%3+1, (i+1)%3+1
-        for j = 1,3 do
-            local j1, j2 = j%3+1, (j+1)%3+1
-            local ra = a[i1]*AR[i2][j] + a[i2]*AR[i1][j]
-            local rb = b[j1]*AR[i][j2] + b[j2]*AR[i][j1]
-            if math.abs(t[i2]*R[i1][j] - t[i1]*R[i2][j]) > ra + rb then return false end
-        end
-    end
-    return true
-end
-
-function relIsAligned(rel)
-    local _,_,_,r11,r12,r13,r21,r22,r23,r31,r32,r33 = rel:GetComponents()
-    local function ok(x,y,z) return math.max(math.abs(x),math.abs(y),math.abs(z)) > 0.99999 end
-    return ok(r11,r12,r13) and ok(r21,r22,r23) and ok(r31,r32,r33)
-end
-
-function boxFullyInsideBox(innerCF, innerSize, outerCF, outerSize)
-    local rel = outerCF:ToObjectSpace(innerCF)
-    local h = innerSize/2; local o = outerSize/2 + Vector3.new(0.01,0.01,0.01)
-    for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
-        local q = rel:PointToWorldSpace(Vector3.new(sx*h.X, sy*h.Y, sz*h.Z))
-        if math.abs(q.X) > o.X or math.abs(q.Y) > o.Y or math.abs(q.Z) > o.Z then return false end
-    end end end
-    return true
-end
-
--- returns shape ("box"/"sphere"/"cylinder"/"wedge") and the cylinder axis ("X","Y","Z")
 function getShapeType(container)
-    local vp = getVisualPart(container)
-    if vp and vp:IsA("Part") then
-        if vp.Shape == Enum.PartType.Ball then return "sphere" end
-        if vp.Shape == Enum.PartType.Cylinder then return "cylinder", "X" end
-    end
-    local name = (container.Name or ""):lower()
+    local name=(container.Name or ""):lower()
     if name:find("sphere") then return "sphere" end
-    if name:find("cylinder") then return "cylinder", "Z" end
-    if name:find("wedge") then return "wedge" end
+    if name:find("cylinder") then return "cylinder" end
     return "box"
 end
 
--- point p is relative to the box centre (local space)
-function pointInShape(shape, axis, size, p, tol)
-    tol = tol or 0.001
-    local hx, hy, hz = size.X/2, size.Y/2, size.Z/2
-    if shape == "sphere" then
-        return (p.X/hx)^2 + (p.Y/hy)^2 + (p.Z/hz)^2 <= 1 + tol
-    elseif shape == "cylinder" then
-        if axis == "X" then return math.abs(p.X) <= hx+tol and (p.Y/hy)^2 + (p.Z/hz)^2 <= 1+tol
-        elseif axis == "Y" then return math.abs(p.Y) <= hy+tol and (p.X/hx)^2 + (p.Z/hz)^2 <= 1+tol end
-        return math.abs(p.Z) <= hz+tol and (p.X/hx)^2 + (p.Y/hy)^2 <= 1+tol
+function isPointInsideShape(container, worldPoint)
+    local shape=getShapeType(container)
+    local cf,size,_,_=getAABB(container)
+    local localPt=cf:PointToObjectSpace(worldPoint)
+    local hx,hy,hz=size.X/2,size.Y/2,size.Z/2
+    if shape=="sphere" then
+        local r=math.min(hx,hy,hz)
+        return localPt.Magnitude<=r+0.01
+    elseif shape=="cylinder" then
+        local r=math.min(hx,hy)
+        local radial=math.sqrt(localPt.X^2+localPt.Y^2)
+        return math.abs(localPt.Z)<=hz+0.01 and radial<=r+0.01
+    else
+        return math.abs(localPt.X)<=hx+0.01 and math.abs(localPt.Y)<=hy+0.01 and math.abs(localPt.Z)<=hz+0.01
     end
-    return math.abs(p.X) <= hx+tol and math.abs(p.Y) <= hy+tol and math.abs(p.Z) <= hz+tol
 end
 
--- Adaptive voxelisation in LOCAL space.
--- cutters: { {aligned=bool, mn=Vector3, mx=Vector3, inv=CFrame, half=Vector3}, ... } all in the target's local space
-function voxelizeLocal(shape, axis, size, cutters, maxPieces)
-    local baseRes = (shape == "box") and 4 or (VOXEL_RESOLUTION or 8)
-    local maxNear = (shape == "box") and 3 or 2
-    local pieces = {}
-    local capped = false
-
-    local function inCutterPoint(p)
-        for _, c in ipairs(cutters) do
-            if c.aligned then
-                if p.X > c.mn.X and p.X < c.mx.X and p.Y > c.mn.Y and p.Y < c.mx.Y and p.Z > c.mn.Z and p.Z < c.mx.Z then return true end
-            else
-                local q = c.inv:PointToObjectSpace(p)
-                if math.abs(q.X) < c.half.X and math.abs(q.Y) < c.half.Y and math.abs(q.Z) < c.half.Z then return true end
+function voxelizeShapeAdaptive(container, negateBoxes, baseRes)
+    baseRes=baseRes or VOXEL_RESOLUTION
+    local _,size,bmin,bmax=getAABB(container)
+    local intMin=Vector3.new(math.huge,math.huge,math.huge)
+    local intMax=Vector3.new(-math.huge,-math.huge,-math.huge)
+    for _,nb in ipairs(negateBoxes) do
+        if bmax.X>nb.min.X and bmin.X<nb.max.X and bmax.Y>nb.min.Y and bmin.Y<nb.max.Y and bmax.Z>nb.min.Z and bmin.Z<nb.max.Z then
+            intMin=Vector3.new(math.min(intMin.X,math.max(bmin.X,nb.min.X)),math.min(intMin.Y,math.max(bmin.Y,nb.min.Y)),math.min(intMin.Z,math.max(bmin.Z,nb.min.Z)))
+            intMax=Vector3.new(math.max(intMax.X,math.min(bmax.X,nb.max.X)),math.max(intMax.Y,math.min(bmax.Y,nb.max.Y)),math.max(intMax.Z,math.min(bmax.Z,nb.max.Z)))
+        end
+    end
+    local coarseCell=Vector3.new(size.X/baseRes,size.Y/baseRes,size.Z/baseRes)
+    local fineCell=coarseCell/2
+    local fineZoneMin=intMin-coarseCell*2; local fineZoneMax=intMax+coarseCell*2
+    local pieces={}
+    for ix=0,baseRes-1 do for iy=0,baseRes-1 do for iz=0,baseRes-1 do
+        local cc=bmin+Vector3.new((ix+0.5)*coarseCell.X,(iy+0.5)*coarseCell.Y,(iz+0.5)*coarseCell.Z)
+        local ccMin=cc-coarseCell/2; local ccMax=cc+coarseCell/2
+        if not (ccMax.X>fineZoneMin.X and ccMin.X<fineZoneMax.X and ccMax.Y>fineZoneMin.Y and ccMin.Y<fineZoneMax.Y and ccMax.Z>fineZoneMin.Z and ccMin.Z<fineZoneMax.Z) then
+            if isPointInsideShape(container,cc) then
+                local skip=false
+                for _,nb in ipairs(negateBoxes) do
+                    if ccMax.X>nb.min.X+0.01 and ccMin.X<nb.max.X-0.01 and ccMax.Y>nb.min.Y+0.01 and ccMin.Y<nb.max.Y-0.01 and ccMax.Z>nb.min.Z+0.01 and ccMin.Z<nb.max.Z-0.01 then skip=true; break end
+                end
+                if not skip then table.insert(pieces,{cf=CFrame.new(cc),size=coarseCell}) end
             end
         end
-        return false
-    end
-
-    -- 0 = no cutter touches the cell, 1 = partially, 2 = fully inside a cutter
-    local function cutterState(c0, h)
-        local state = 0
-        for _, c in ipairs(cutters) do
-            if c.aligned then
-                local e = 0.005
-                if c0.X+h.X <= c.mn.X+e or c0.X-h.X >= c.mx.X-e or c0.Y+h.Y <= c.mn.Y+e or c0.Y-h.Y >= c.mx.Y-e or c0.Z+h.Z <= c.mn.Z+e or c0.Z-h.Z >= c.mx.Z-e then
-                    -- disjoint
-                elseif c0.X-h.X >= c.mn.X-e and c0.X+h.X <= c.mx.X+e and c0.Y-h.Y >= c.mn.Y-e and c0.Y+h.Y <= c.mx.Y+e and c0.Z-h.Z >= c.mn.Z-e and c0.Z+h.Z <= c.mx.Z+e then
-                    return 2
-                else state = 1 end
-            else
-                local full = true
-                for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
-                    local q = c.inv:PointToObjectSpace(c0 + Vector3.new(sx*h.X, sy*h.Y, sz*h.Z))
-                    if math.abs(q.X) > c.half.X+0.005 or math.abs(q.Y) > c.half.Y+0.005 or math.abs(q.Z) > c.half.Z+0.005 then full = false end
-                end end end
-                if full then return 2 end
-                local q = c.inv:PointToObjectSpace(c0); local r = h.Magnitude
-                if math.abs(q.X) <= c.half.X+r and math.abs(q.Y) <= c.half.Y+r and math.abs(q.Z) <= c.half.Z+r then state = 1 end
-            end
-        end
-        return state
-    end
-
-    local function shapeState(c0, h)
-        if shape == "box" then return 2 end
-        local n = 0
-        for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
-            if pointInShape(shape, axis, size, c0 + Vector3.new(sx*h.X, sy*h.Y, sz*h.Z)) then n = n + 1 end
-        end end end
-        if n == 8 then return 2 end
-        if n > 0 or pointInShape(shape, axis, size, c0) then return 1 end
-        return 0
-    end
-
-    local function add(c0, h)
-        if #pieces >= maxPieces then capped = true; return end
-        pieces[#pieces+1] = {center = c0, size = h*2}
-    end
-
-    local function rec(c0, h, depth)
-        if capped then return end
-        local ss = shapeState(c0, h); if ss == 0 then return end
-        local cs = cutterState(c0, h); if cs == 2 then return end
-        if ss == 2 and cs == 0 then add(c0, h); return end
-        local limit = (cs == 0) and 0 or maxNear
-        if depth < limit and math.min(h.X, h.Y, h.Z) > 0.05 then
-            local q = h/2
-            for sx = -1,1,2 do for sy = -1,1,2 do for sz = -1,1,2 do
-                rec(c0 + Vector3.new(sx*q.X, sy*q.Y, sz*q.Z), q, depth+1)
-            end end end
-        else
-            if pointInShape(shape, axis, size, c0, 0) and not inCutterPoint(c0) then add(c0, h) end
-        end
-    end
-
-    local cell = Vector3.new(size.X/baseRes, size.Y/baseRes, size.Z/baseRes)
-    local h = cell/2
-    for ix = 0, baseRes-1 do for iy = 0, baseRes-1 do for iz = 0, baseRes-1 do
-        local c0 = -size/2 + Vector3.new((ix+0.5)*cell.X, (iy+0.5)*cell.Y, (iz+0.5)*cell.Z)
-        rec(c0, h, 0)
     end end end
-    return pieces, capped
-end
-
--- Builds the list of pieces (world CFrame + size) that remain of `container` after the cut.
--- Returns pieces, status   (status: "ok", "wedge", "capped")
-function computePiecesForTarget(container, tcf, tsize, cutters)
-    local shape, axis = getShapeType(container)
-    local rels = {}
-    for _, cu in ipairs(cutters) do
-        if obbIntersect(tcf, tsize, cu.cf, cu.size, 0.01) then
-            local rel = tcf:ToObjectSpace(cu.cf)
-            rels[#rels+1] = {cu = cu, rel = rel, aligned = relIsAligned(rel)}
-        end
-    end
-    if #rels == 0 then return nil, "untouched" end
-
-    if shape == "wedge" then
-        -- a wedge can't be cut exactly: only remove it when a cutter swallows it completely
-        for _, r in ipairs(rels) do
-            if boxFullyInsideBox(tcf, tsize, r.cu.cf, r.cu.size) then return {}, "ok" end
-        end
-        return nil, "wedge"
-    end
-
-    local allAligned = true
-    for _, r in ipairs(rels) do if not r.aligned then allAligned = false end end
-
-    local pieces = {}
-    if shape == "box" and allAligned then
-        local remaining = {{min = -tsize/2, max = tsize/2}}
-        for _, r in ipairs(rels) do
-            local ex = worldExtents(r.rel, r.cu.size)
-            local cmin = r.rel.Position - ex/2; local cmax = r.rel.Position + ex/2
-            local nr = {}
-            for _, pc in ipairs(remaining) do
-                for _, s in ipairs(splitBoxByBox(pc.min, pc.max, cmin, cmax)) do nr[#nr+1] = s end
-            end
-            remaining = nr
-        end
-        for _, pc in ipairs(remaining) do
-            local sz = pc.max - pc.min
-            if sz.X > 0.05 and sz.Y > 0.05 and sz.Z > 0.05 then
-                pieces[#pieces+1] = {cf = tcf * CFrame.new((pc.min + pc.max)/2), size = sz}
+    local fxMin=math.floor((fineZoneMin.X-bmin.X)/fineCell.X)-1; local fyMin=math.floor((fineZoneMin.Y-bmin.Y)/fineCell.Y)-1; local fzMin=math.floor((fineZoneMin.Z-bmin.Z)/fineCell.Z)-1
+    local fxMax=math.ceil((fineZoneMax.X-bmin.X)/fineCell.X)+1; local fyMax=math.ceil((fineZoneMax.Y-bmin.Y)/fineCell.Y)+1; local fzMax=math.ceil((fineZoneMax.Z-bmin.Z)/fineCell.Z)+1
+    for ix=fxMin,fxMax do for iy=fyMin,fyMax do for iz=fzMin,fzMax do
+        local fc=bmin+Vector3.new((ix+0.5)*fineCell.X,(iy+0.5)*fineCell.Y,(iz+0.5)*fineCell.Z)
+        if fc.X>=bmin.X-0.01 and fc.X<=bmax.X+0.01 and fc.Y>=bmin.Y-0.01 and fc.Y<=bmax.Y+0.01 and fc.Z>=bmin.Z-0.01 and fc.Z<=bmax.Z+0.01 then
+            if fc.X>=fineZoneMin.X and fc.X<=fineZoneMax.X and fc.Y>=fineZoneMin.Y and fc.Y<=fineZoneMax.Y and fc.Z>=fineZoneMin.Z and fc.Z<=fineZoneMax.Z then
+                if isPointInsideShape(container,fc) then
+                    local fcMin=fc-fineCell/2; local fcMax=fc+fineCell/2
+                    local skip=false
+                    for _,nb in ipairs(negateBoxes) do
+                        if fcMax.X>nb.min.X+0.01 and fcMin.X<nb.max.X-0.01 and fcMax.Y>nb.min.Y+0.01 and fcMin.Y<nb.max.Y-0.01 and fcMax.Z>nb.min.Z+0.01 and fcMin.Z<nb.max.Z-0.01 then skip=true; break end
+                    end
+                    if not skip then table.insert(pieces,{cf=CFrame.new(fc),size=fineCell}) end
+                end
             end
         end
-        return pieces, "ok"
-    end
-
-    local lc = {}
-    for _, r in ipairs(rels) do
-        local ex = worldExtents(r.rel, r.cu.size)
-        lc[#lc+1] = {aligned = r.aligned, mn = r.rel.Position - ex/2, mx = r.rel.Position + ex/2, inv = r.rel, half = r.cu.size/2}
-    end
-    local vox, capped = voxelizeLocal(shape, axis, tsize, lc, 1200)
-    for _, v in ipairs(vox) do
-        if v.size.X > 0.05 and v.size.Y > 0.05 and v.size.Z > 0.05 then
-            pieces[#pieces+1] = {cf = tcf * CFrame.new(v.center), size = v.size, voxel = true}
-        end
-    end
-    return pieces, capped and "capped" or "ok"
-end
-
-function poseOk(blk, cf)
-    if not blk or not blk.Parent then return false end
-    local ok, p = pcall(function() return blk:GetPivot() end)
-    if not ok then return false end
-    return (p.Position - cf.Position).Magnitude < 0.1 and p.LookVector:Dot(cf.LookVector) > 0.999 and p.UpVector:Dot(cf.UpVector) > 0.999
+    end end end
+    return pieces
 end
 
 function performRealNegate()
-    if negateBusy then return end
-    pruneNegate()
-    if #negateMarked == 0 then return end
-    local functions = Services.Replicated:FindFirstChild("Functions", true)
-    if not functions then showToast("server remotes not found", colorEliminarCard); return end
-    local placeFunc, resizeFunc = functions:FindFirstChild("PlaceBlock"), functions:FindFirstChild("CommitResize")
-    local fillFunc, moveFunc = functions:FindFirstChild("FillBlock"), functions:FindFirstChild("CommitMove")
-    local destroyFunc = functions:FindFirstChild("DestroyBlock")
-    if not (placeFunc and resizeFunc and moveFunc and destroyFunc) then showToast("missing server remotes", colorEliminarCard); return end
+    if #negateMarked==0 then return end
+    local functions=Services.Replicated:FindFirstChild("Functions",true)
+    if not functions then return end
+    local placeFunc=functions:FindFirstChild("PlaceBlock")
+    local resizeFunc=functions:FindFirstChild("CommitResize")
+    local fillFunc=functions:FindFirstChild("FillBlock")
+    local moveFunc=functions:FindFirstChild("CommitMove")
+    local destroyFunc=functions:FindFirstChild("DestroyBlock")
+    if not (placeFunc and resizeFunc and moveFunc and destroyFunc) then return end
 
-    negateBusy = true
-    task.spawn(function()
-        local okAll, err = pcall(function()
-            destroyNegatePreview()
-            -- 1) snapshot the cutters, then give the marked blocks their real colour back
-            local cutters, markedList = {}, {}
-            for _, c in ipairs(negateMarked) do
-                if c and c.Parent then
-                    markedList[#markedList+1] = c
-                    local cf, size = getBoundsOf(c)
-                    if validBox(cf, size) then cutters[#cutters+1] = {cf = cf, size = size, src = c} end
-                end
-            end
-            for _, c in ipairs(markedList) do negateRestore(c) end
-            local markedSet = {}; for _, c in ipairs(markedList) do markedSet[c] = true end
-            negateMarked = {}; negateMarkedSet = {}; negatePartsOf = {}; negateOriginal = {}
-            updateNegateCount()
-            negateMode = false
-            negateModeBtn.Text = "MARK MODE: OFF"; negateModeBtn.BackgroundColor3 = colorActivo
+    destroyNegatePreview()
 
-            -- 2) find every block touched by a cutter (never players / non-blocks)
-            local op = OverlapParams.new()
-            op.FilterType = Enum.RaycastFilterType.Exclude
-            op.FilterDescendantsInstances = getIgnoreList()
-            op.MaxParts = 3000
-            local candidates, seen = {}, {}
-            for _, cu in ipairs(cutters) do
-                local ok, parts = pcall(function() return workspace:GetPartBoundsInBox(cu.cf, cu.size + Vector3.new(0.2,0.2,0.2), op) end)
-                if ok and parts then
-                    for _, part in ipairs(parts) do
-                        local container = resolveNegatable(part)
-                        if container and not seen[container] and not markedSet[container] then
-                            seen[container] = true
-                            candidates[#candidates+1] = container
+    local negateBoxes={}; local markedSet={}
+    for _,obj in ipairs(negateMarked) do
+        markedSet[obj]=true
+        local _,_,bmin,bmax=getAABB(obj)
+        table.insert(negateBoxes,{min=bmin,max=bmax,source=obj})
+    end
+    local toDelete={}; local toRebuild={}; local processed={}; local rebuildKeys={}
+    for _,nbox in ipairs(negateBoxes) do
+        local region=Region3.new(nbox.min-Vector3.new(0.5,0.5,0.5),nbox.max+Vector3.new(0.5,0.5,0.5))
+        local parts=workspace:FindPartsInRegion3WithIgnoreList(region,{proxyPart,rotateProxy,negateProxy,lp.Character},500)
+        for _,part in ipairs(parts) do
+            local realTarget=getRealTarget(part)
+            if realTarget and not processed[realTarget] then
+                processed[realTarget]=true
+                local container,colorPart=getBlockInfo(realTarget)
+                if container then
+                    local _,_,bmin,bmax=getAABB(container)
+                    local overlapped=bmax.X>nbox.min.X+0.01 and bmin.X<nbox.max.X-0.01 and bmax.Y>nbox.min.Y+0.01 and bmin.Y<nbox.max.Y-0.01 and bmax.Z>nbox.min.Z+0.01 and bmin.Z<nbox.max.Z-0.01
+                    if overlapped then
+                        table.insert(toDelete,container)
+                        local shape=getShapeType(container)
+                        local brick=colorPart and colorPart.BrickColor or BrickColor.new("Medium stone grey")
+                        local material=colorPart and colorPart.Material or Enum.Material.SmoothPlastic
+                        local assetName=(container:IsA("Model") and container.Name) or (container.Parent and container.Parent.Name) or "Block"
+                        if shape=="cylinder" or shape=="sphere" then
+                            local voxels=voxelizeShapeAdaptive(container,negateBoxes,VOXEL_RESOLUTION)
+                            for _,v in ipairs(voxels) do
+                                local key=string.format("%.2f_%.2f_%.2f_%.2f_%.2f_%.2f",v.cf.Position.X,v.cf.Position.Y,v.cf.Position.Z,v.size.X,v.size.Y,v.size.Z)
+                                if not rebuildKeys[key] then rebuildKeys[key]=true; table.insert(toRebuild,{cf=v.cf,size=v.size,brickColor=brick,material=material,assetName="Block"}) end
+                            end
+                        else
+                            local remaining={{min=bmin,max=bmax}}
+                            for _,nbox2 in ipairs(negateBoxes) do
+                                local newRemaining={}
+                                for _,piece in ipairs(remaining) do
+                                    local o=piece.max.X>nbox2.min.X+0.01 and piece.min.X<nbox2.max.X-0.01 and piece.max.Y>nbox2.min.Y+0.01 and piece.min.Y<nbox2.max.Y-0.01 and piece.max.Z>nbox2.min.Z+0.01 and piece.min.Z<nbox2.max.Z-0.01
+                                    if o then
+                                        local split=splitBoxByBox(piece.min,piece.max,nbox2.min,nbox2.max)
+                                        for _,s in ipairs(split) do table.insert(newRemaining,s) end
+                                    else table.insert(newRemaining,piece) end
+                                end
+                                remaining=newRemaining
+                            end
+                            for _,piece in ipairs(remaining) do
+                                local pc=(piece.min+piece.max)/2; local ps=piece.max-piece.min
+                                if ps.X>0.05 and ps.Y>0.05 and ps.Z>0.05 then
+                                    local key=string.format("%.2f_%.2f_%.2f_%.2f_%.2f_%.2f",pc.X,pc.Y,pc.Z,ps.X,ps.Y,ps.Z)
+                                    if not rebuildKeys[key] then rebuildKeys[key]=true; table.insert(toRebuild,{cf=CFrame.new(pc),size=ps,brickColor=brick,material=material,assetName=assetName}) end
+                                end
+                            end
                         end
                     end
                 end
             end
-
-            -- 3) compute what is left of each touched block (local-space maths => rotation preserved)
-            local jobs, skippedWedge, cappedCount = {}, 0, 0
-            for _, container in ipairs(candidates) do
-                local tcf, tsize = getBoundsOf(container)
-                if validBox(tcf, tsize) then
-                    local pieces, status = computePiecesForTarget(container, tcf, tsize, cutters)
-                    if pieces then
-                        local vp = getVisualPart(container)
-                        local assetName = (container:IsA("Model") and container.Name) or (container.Parent and container.Parent.Name) or "Block"
-                        jobs[#jobs+1] = {
-                            container = container, pieces = pieces,
-                            brick = vp and vp.BrickColor or BrickColor.new("Medium stone grey"),
-                            material = vp and vp.Material or Enum.Material.SmoothPlastic,
-                            assetName = assetName,
-                        }
-                        if status == "capped" then cappedCount = cappedCount + 1 end
-                    elseif status == "wedge" then skippedWedge = skippedWedge + 1 end
-                end
-            end
-
-            -- 4) delete originals and CONFIRM they are gone (otherwise no rebuild => no duplicates)
-            local function tryDestroy(list)
-                for _, o in ipairs(list) do if o and o.Parent then pcall(function() destroyFunc:InvokeServer(o) end) end end
-            end
-            local allTargets = {}
-            for _, c in ipairs(markedList) do allTargets[#allTargets+1] = c end
-            for _, j in ipairs(jobs) do allTargets[#allTargets+1] = j.container end
-            tryDestroy(allTargets); task.wait(0.2)
-            local survivors = {}
-            for _, o in ipairs(allTargets) do if o.Parent then survivors[#survivors+1] = o end end
-            if #survivors > 0 then tryDestroy(survivors); task.wait(0.25) end
-            local failed = 0
-            local goodJobs = {}
-            for _, j in ipairs(jobs) do
-                if j.container.Parent then failed = failed + 1 else goodJobs[#goodJobs+1] = j end
-            end
-            for _, c in ipairs(markedList) do if c.Parent then failed = failed + 1 end end
-
-            -- 5) rebuild the remaining pieces with their exact CFrame (position + rotation)
-            local total = 0
-            for _, j in ipairs(goodJobs) do total = total + #j.pieces end
-            local done, bad = 0, 0
-            for _, j in ipairs(goodJobs) do
-                local asset
-                for _, pc in ipairs(j.pieces) do
-                    done = done + 1
-                    negateProgressText.Text = "rebuilding: "..done.."/"..total
-                    local assetToPlace
-                    if pc.voxel then assetToPlace = findOriginalAsset("Block")
-                    else assetToPlace = findOriginalAsset(j.assetName) end
-                    assetToPlace = assetToPlace or safeBlockPath("Blocks","Basic","Block","Block")
-                    local tempCF = pc.cf + Vector3.new(math.random(100,500), 100, math.random(100,500))
-                    local ok, newBlock = pcall(function() return placeFunc:InvokeServer(assetToPlace, tempCF, j.brick, j.material) end)
-                    if ok and newBlock then
-                        invokeResize(newBlock, tempCF, pc.size)
-                        task.wait(0.03)
-                        local vis = getVisualPart(newBlock)
-                        if vis and (getObjSize(newBlock) - pc.size).Magnitude > 0.06 then invokeResizeVerified(newBlock, tempCF, pc.size) end
-                        if fillFunc then pcall(function() fillFunc:InvokeServer(newBlock, j.brick, j.material) end) end
-                        pcall(function() moveFunc:InvokeServer(newBlock, pc.cf) end)
-                        task.wait(0.03)
-                        if not poseOk(newBlock, pc.cf) then
-                            pcall(function() moveFunc:InvokeServer(newBlock, pc.cf) end)
-                            task.wait(0.05)
-                            if not poseOk(newBlock, pc.cf) then bad = bad + 1 end
-                        end
-                    else bad = bad + 1 end
-                    task.wait(fastBuild and 0.01 or 0.03)
-                end
-            end
-            negateProgressText.Text = "done! ("..total.." pieces)"
-            if failed > 0 then showToast(failed.." block(s) could not be deleted (no permission?)", colorEliminarCard) end
-            if skippedWedge > 0 then showToast(skippedWedge.." wedge(s) skipped (can't be cut)", colorInfo) end
-            if cappedCount > 0 then showToast("some shapes hit the piece limit (cut is rougher)", colorInfo) end
-            if bad > 0 then showToast(bad.." piece(s) were placed imperfectly", colorEliminarCard) end
-            task.wait(2); negateProgressText.Text = ""
-        end)
-        if not okAll then
-            warn("[PAT] negate error: "..tostring(err))
-            showToast("negate error - see console (F9)", colorEliminarCard)
-            negateProgressText.Text = ""
         end
-        negateBusy = false
+    end
+    for _,obj in ipairs(toDelete) do pcall(function() destroyFunc:InvokeServer(obj) end) end
+    for _,obj in ipairs(negateMarked) do if not processed[obj] then pcall(function() destroyFunc:InvokeServer(obj) end) end end
+    task.wait(0.15)
+    for _,obj in ipairs(toDelete) do pcall(function() destroyFunc:InvokeServer(obj) end) end
+    local total=#toRebuild
+    task.spawn(function()
+        for i,b in ipairs(toRebuild) do
+            negateProgressText.Text="rebuilding: "..i.."/"..total
+            local tempCF=b.cf+Vector3.new(math.random(100,500),100,math.random(100,500))
+            local assetToPlace=findOriginalAsset(b.assetName) or safeBlockPath("Blocks","Basic","Block","Block")
+            local ok,newBlock=pcall(function() return placeFunc:InvokeServer(assetToPlace,tempCF,b.brickColor,b.material) end)
+            if ok and newBlock then
+                invokeResize(newBlock,tempCF,b.size)
+                if fillFunc then pcall(function() fillFunc:InvokeServer(newBlock,b.brickColor,b.material) end) end
+                pcall(function() moveFunc:InvokeServer(newBlock,b.cf) end)
+            end
+            task.wait(fastBuild and 0.01 or 0.03)
+        end
+        negateProgressText.Text="done! ("..total.." pieces)"
+        task.wait(2); negateProgressText.Text=""
     end)
+    negateMarked={}; updateNegateCount()
+    negateMode=false
+    negateModeBtn.Text="MARK MODE: OFF"; negateModeBtn.BackgroundColor3=colorActivo
 end
 
 negateModeBtn.MouseButton1Click:Connect(function()
@@ -2017,7 +1939,6 @@ end
 convertBeta=Instance.new("TextLabel",convertMenu); convertBeta.Size=UDim2.new(1,0,0,28); convertBeta.Position=UDim2.new(0,0,0,5)
 convertBeta.BackgroundTransparency=1; convertBeta.Text="convert"; convertBeta.Font=Enum.Font.GothamBold; convertBeta.TextColor3=TEXT_COLOR; convertBeta.TextSize=IS_MOBILE and 20 or 18
 
--- SEARCH BOX FOR CONVERT
 searchBox = Instance.new("TextBox", convertMenu)
 searchBox.Size = UDim2.new(0.9, 0, 0, 30)
 searchBox.Position = UDim2.new(0.05, 0, 0, 35)
@@ -2036,7 +1957,6 @@ convertScroll.Size=UDim2.new(1,-20,1,-80); convertScroll.Position=UDim2.new(0,10
 convertScroll.BackgroundTransparency=1; convertScroll.ScrollBarThickness=4; convertScroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
 convLayout=Instance.new("UIListLayout",convertScroll); convLayout.Padding=UDim.new(0,5)
 
--- FAVORITES SYSTEM
 local favFile = folderName .. "/PAT_Favorites.json"
 local favoriteBlocks = {}
 pcall(function()
@@ -2221,7 +2141,7 @@ searchBox:GetPropertyChangedSignal("Text"):Connect(function()
         searchDebounce = false
     end)
 end)
-updateConvertList() -- Initial build
+updateConvertList()
 
 convertBtn.MouseButton1Click:Connect(function() if convertMenu.Visible then closeConvertPanel() else openConvertPanel() end end)
 
@@ -2498,7 +2418,6 @@ local function updateBoxFrameFromCorners(a, b)
     boxSelectFrame.Size     = UDim2.fromOffset(maxX - minX, maxY - minY)
 end
 
--- MODIFICADO: OPTIMIZACIÓN EXTREMA, LÍMITE DE SELECCIÓN Y FILTRO ANTI-CRASH
 local _bsLastUpdate = 0
 local MAX_BOX_SELECT = 250
 
@@ -2526,7 +2445,7 @@ local function updateLiveBoxSelect()
         
         if obj:IsA("Model") or obj:IsA("BasePart") then
             local isSelectable = true
-            if obj:FindFirstChildOfClass("Humanoid") or isPlayerObject(obj) then isSelectable = false end
+            if obj:FindFirstChildOfClass("Humanoid") then isSelectable = false end
             if obj.Name == "Baseplate" or obj:IsA("Terrain") then isSelectable = false end
             if obj:IsA("BasePart") and obj.Name == "MouseFilterPart" then isSelectable = false end
             if obj:IsA("BasePart") and obj.Name == "base" then isSelectable = false end
@@ -2542,11 +2461,9 @@ local function updateLiveBoxSelect()
                     cf, size = obj.CFrame, obj.Size
                 end
 
-                -- Filtro Anti-Crash para bloques de tamaño infinito o inválidos
                 if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
                    and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
                     
-                    -- Optimización: Revisar centro primero para no calcular 8 esquinas a lo pendejo
                     local centerPos, centerOnScreen = cam:WorldToViewportPoint(cf.Position)
                     if centerOnScreen and centerPos.X == centerPos.X and centerPos.Y == centerPos.Y then
                         local margin = math.max(size.X, size.Y, size.Z) * 50
@@ -2722,7 +2639,7 @@ scroll.ScrollBarThickness=10; scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y; s
 
 function killUI()
     pcall(function() local env=(getgenv and getgenv()) or _G; if env.PAT_CLEANUP then env.PAT_CLEANUP() end end)
-    unlockCamera(); pcall(clearNegateMarks); pcall(destroyNegatePreview); MainUI:Destroy()
+    unlockCamera(); destroyNegatePreview(); MainUI:Destroy()
     pcall(function() ModalUI:Destroy() end)
     pcall(function() TopUI:Destroy() end)
     pcall(function() coordsGui:Destroy() end)
@@ -2743,25 +2660,40 @@ function createToggle(txt,val,cb)
     btnOff.MouseButton1Click:Connect(function() if val then val=false; updateBtns(); playUISound(); cb(val) end end); updateBtns()
 end
 
-function createSlider(txt,min,max,default,cb)
-    local card=Instance.new("Frame",scroll); card.Size=UDim2.new(0.95,0,0,IS_MOBILE and 76 or 66); card.BackgroundColor3=colorRow; Instance.new("UICorner",card).CornerRadius=UDim.new(0,10)
-    local lab=Instance.new("TextLabel",card); lab.Size=UDim2.new(1,-24,0,22); lab.Position=UDim2.new(0,12,0,6); lab.BackgroundTransparency=1; lab.Font=Enum.Font.GothamBold; lab.Text=txt; lab.TextColor3=TEXT_COLOR; lab.TextSize=IS_MOBILE and 14 or 13; lab.TextXAlignment=Enum.TextXAlignment.Left
-    local useInt=(max-min)>=20
-    local function fmt(v) return useInt and string.format("%d",math.floor(v+0.5)) or string.format("%.2f",v) end
-    local valBox=Instance.new("TextLabel",card); valBox.Size=UDim2.fromOffset(IS_MOBILE and 60 or 54,IS_MOBILE and 30 or 26); valBox.Position=UDim2.new(0,12,1,-10); valBox.AnchorPoint=Vector2.new(0,1); valBox.BackgroundColor3=colorInactivo; valBox.BorderSizePixel=0; valBox.Font=Enum.Font.GothamBold; valBox.TextColor3=TEXT_COLOR; valBox.TextSize=IS_MOBILE and 14 or 13; valBox.Text=fmt(default); Instance.new("UICorner",valBox).CornerRadius=UDim.new(0,8)
-    local bar=Instance.new("Frame",card); bar.Size=UDim2.new(1,-(IS_MOBILE and 100 or 92),0,36); bar.Position=UDim2.new(0,IS_MOBILE and 84 or 76,1,-10); bar.AnchorPoint=Vector2.new(0,1); bar.BackgroundTransparency=1
-    local line=Instance.new("Frame",bar); line.Size=UDim2.new(1,0,0,4); line.Position=UDim2.new(0,0,0.5,0); line.AnchorPoint=Vector2.new(0,0.5); line.BackgroundColor3=Color3.fromHex("8C4545"); line.BorderSizePixel=0; Instance.new("UICorner",line).CornerRadius=UDim.new(1,0)
-    local pct=math.clamp((default-min)/(max-min),0,1)
-    local knob=Instance.new("Frame",bar); knob.Size=UDim2.fromOffset(IS_MOBILE and 16 or 14,IS_MOBILE and 30 or 26); knob.AnchorPoint=Vector2.new(0.5,0.5); knob.Position=UDim2.new(pct,0,0.5,0); knob.BackgroundColor3=Color3.new(1,1,1); knob.BorderSizePixel=0; Instance.new("UICorner",knob).CornerRadius=UDim.new(0,4)
-    local dragging=false
-    local function apply(x)
-        local rel=math.clamp((x-bar.AbsolutePosition.X)/math.max(1,bar.AbsoluteSize.X),0,1)
-        local val=min+(max-min)*rel; knob.Position=UDim2.new(rel,0,0.5,0); valBox.Text=fmt(val); cb(val)
+local paletteCard = Instance.new("Frame", scroll)
+paletteCard.Size = UDim2.new(0.95, 0, 0, IS_MOBILE and 64 or 54)
+paletteCard.BackgroundColor3 = colorRow
+Instance.new("UICorner", paletteCard).CornerRadius = UDim.new(0, 10)
+local paletteLab = Instance.new("TextLabel", paletteCard)
+paletteLab.Size = UDim2.new(0.6, -12, 1, 0)
+paletteLab.Position = UDim2.new(0, 12, 0, 0)
+paletteLab.BackgroundTransparency = 1
+paletteLab.Font = Enum.Font.GothamBold
+paletteLab.Text = "handle color palette"
+paletteLab.TextColor3 = TEXT_COLOR
+paletteLab.TextSize = IS_MOBILE and 15 or 14
+paletteLab.TextXAlignment = Enum.TextXAlignment.Left
+paletteLab.TextWrapped = true
+local paletteBtn = Instance.new("TextButton", paletteCard)
+paletteBtn.Size = UDim2.new(0.34, 0, 0.62, 0)
+paletteBtn.AnchorPoint = Vector2.new(1, 0.5)
+paletteBtn.Position = UDim2.new(1, -10, 0.5, 0)
+paletteBtn.BackgroundColor3 = colorActivo
+paletteBtn.Text = "Roblox Studio"
+paletteBtn.TextColor3 = TEXT_COLOR
+paletteBtn.Font = Enum.Font.GothamBold
+paletteBtn.TextSize = IS_MOBILE and 14 or 13
+Instance.new("UICorner", paletteBtn).CornerRadius = UDim.new(0, 8)
+paletteBtn.MouseButton1Click:Connect(function()
+    if handleColorPalette == "Roblox Studio" then
+        handleColorPalette = "Build Mode"
+    else
+        handleColorPalette = "Roblox Studio"
     end
-    bar.InputBegan:Connect(function(inp) if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then dragging=true; apply(inp.Position.X) end end)
-    bar.InputEnded:Connect(function(inp) if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
-    track(Services.UserInput.InputChanged:Connect(function(inp) if dragging and (inp.UserInputType==Enum.UserInputType.MouseMovement or inp.UserInputType==Enum.UserInputType.Touch) then apply(inp.Position.X) end end))
-end
+    paletteBtn.Text = handleColorPalette
+    playUISound()
+    if visualDraggers.move then visualDraggers.move:Destroy(); visualDraggers.move = nil; if currentMode == "move" then activateMove() end end
+end)
 
 createToggle("tap to select",tapToSelectEnabled,function(v) tapToSelectEnabled=v end)
 createToggle("hide handles on close",hideHandlesOnClose,function(v) hideHandlesOnClose=v end)
@@ -2769,22 +2701,14 @@ createToggle("custom rotate handle",useAdvancedRotate,function(v) useAdvancedRot
 createToggle("show block name (with coordinates)",false,function(v) showBlockName=v end)
 createToggle("ui sound",uiSoundEnabled,function(v) uiSoundEnabled=v; uiSound.Volume=v and 0.7 or 0 end)
 createToggle("selection outline",showOutline,function(v) showOutline=v; if not v and outline then outline.Adornee=nil end end)
-createToggle("show crosshair",showCrosshair,function(v) showCrosshair=v; if not v then crosshair.Visible=false end end)
-createToggle("auto-resize after convert",autoResizeOnConvert,function(v) autoResizeOnConvert=v end)
-createToggle("auto-select after copy",autoSelectAfterCopy,function(v) autoSelectAfterCopy=v end)
 createToggle("always snap (no ctrl needed)",alwaysSnap,function(v) alwaysSnap=v end)
 createToggle("show coordinates",showCoords,function(v) showCoords=v end)
-createToggle("fast build (less wait)",fastBuild,function(v) fastBuild=v end)
 createToggle("lock camera while dragging",lockCamOnDrag,function(v) lockCamOnDrag=v; if not v then unlockCamera() end end)
 
-createSlider("ui opacity",0.3,1.0,uiOpacity,function(v) uiOpacity=v; toolBar.BackgroundTransparency=1-v; infoPanel.BackgroundTransparency=1-v; settingsFrame.BackgroundTransparency=1-v end)
-createSlider("outline thickness",0.01,0.15,outlineThickness,function(v) outlineThickness=v; if outline then outline.LineThickness=v end end)
-createSlider("undo history",5,200,maxUndo,function(v) maxUndo=math.floor(v) end)
-
-toolbarCard=Instance.new("Frame",scroll); toolbarCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 110 or 100); toolbarCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",toolbarCard).CornerRadius=UDim.new(0,12)
-toolbarTitle=Instance.new("TextLabel",toolbarCard); toolbarTitle.Size=UDim2.new(1,0,0,22); toolbarTitle.Position=UDim2.new(0,0,0,4); toolbarTitle.BackgroundTransparency=1; toolbarTitle.Text="toolbar position"; toolbarTitle.TextColor3=TEXT_COLOR; toolbarTitle.Font=Enum.Font.GothamBold; toolbarTitle.TextSize=IS_MOBILE and 14 or 13
-toolbarRow=Instance.new("Frame",toolbarCard); toolbarRow.Size=UDim2.new(0.94,0,0,IS_MOBILE and 52 or 44); toolbarRow.Position=UDim2.new(0.03,0,0,IS_MOBILE and 32 or 28); toolbarRow.BackgroundTransparency=1
-toolbarRowLayout=Instance.new("UIListLayout",toolbarRow); toolbarRowLayout.FillDirection=Enum.FillDirection.Horizontal; toolbarRowLayout.Padding=UDim.new(0,4)
+local toolbarCard=Instance.new("Frame",scroll); toolbarCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 110 or 100); toolbarCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",toolbarCard).CornerRadius=UDim.new(0,12)
+local toolbarTitle=Instance.new("TextLabel",toolbarCard); toolbarTitle.Size=UDim2.new(1,0,0,22); toolbarTitle.Position=UDim2.new(0,0,0,4); toolbarTitle.BackgroundTransparency=1; toolbarTitle.Text="toolbar position"; toolbarTitle.TextColor3=TEXT_COLOR; toolbarTitle.Font=Enum.Font.GothamBold; toolbarTitle.TextSize=IS_MOBILE and 14 or 13
+local toolbarRow=Instance.new("Frame",toolbarCard); toolbarRow.Size=UDim2.new(0.94,0,0,IS_MOBILE and 52 or 44); toolbarRow.Position=UDim2.new(0.03,0,0,IS_MOBILE and 32 or 28); toolbarRow.BackgroundTransparency=1
+local toolbarRowLayout=Instance.new("UIListLayout",toolbarRow); toolbarRowLayout.FillDirection=Enum.FillDirection.Horizontal; toolbarRowLayout.Padding=UDim.new(0,4)
 local edges={"bottom","top","left","right"}; local edgeBtns={}
 for _,e in ipairs(edges) do
     local b=Instance.new("TextButton",toolbarRow); b.Size=UDim2.new(0.24,0,1,0); b.BackgroundColor3=(toolbarEdge==e) and colorActivo or colorInactivo
@@ -2793,42 +2717,42 @@ for _,e in ipairs(edges) do
     table.insert(edgeBtns,b)
 end
 
-presetCard=Instance.new("Frame",scroll); presetCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 100 or 80); presetCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",presetCard).CornerRadius=UDim.new(0,12)
-presetTitle=Instance.new("TextLabel",presetCard); presetTitle.Size=UDim2.new(1,0,0,20); presetTitle.Position=UDim2.new(0,0,0,4); presetTitle.BackgroundTransparency=1; presetTitle.Text="grid presets"; presetTitle.TextColor3=TEXT_COLOR; presetTitle.Font=Enum.Font.GothamBold; presetTitle.TextSize=IS_MOBILE and 14 or 12
-presetValues={0.05,0.1,0.25,0.5,1,2,4}
-presetRow=Instance.new("Frame",presetCard); presetRow.Size=UDim2.new(0.94,0,0,IS_MOBILE and 60 or 45); presetRow.Position=UDim2.new(0.03,0,0,IS_MOBILE and 32 or 28); presetRow.BackgroundTransparency=1
-presetLayout=Instance.new("UIListLayout",presetRow); presetLayout.FillDirection=Enum.FillDirection.Horizontal; presetLayout.Padding=UDim.new(0,4)
+local presetCard=Instance.new("Frame",scroll); presetCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 100 or 80); presetCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",presetCard).CornerRadius=UDim.new(0,12)
+local presetTitle=Instance.new("TextLabel",presetCard); presetTitle.Size=UDim2.new(1,0,0,20); presetTitle.Position=UDim2.new(0,0,0,4); presetTitle.BackgroundTransparency=1; presetTitle.Text="grid presets"; presetTitle.TextColor3=TEXT_COLOR; presetTitle.Font=Enum.Font.GothamBold; presetTitle.TextSize=IS_MOBILE and 14 or 12
+local presetValues={0.05,0.1,0.25,0.5,1,2,4}
+local presetRow=Instance.new("Frame",presetCard); presetRow.Size=UDim2.new(0.94,0,0,IS_MOBILE and 60 or 45); presetRow.Position=UDim2.new(0.03,0,0,IS_MOBILE and 32 or 28); presetRow.BackgroundTransparency=1
+local presetLayout=Instance.new("UIListLayout",presetRow); presetLayout.FillDirection=Enum.FillDirection.Horizontal; presetLayout.Padding=UDim.new(0,4)
 for _,val in ipairs(presetValues) do
     local pb=Instance.new("TextButton",presetRow); pb.Size=UDim2.new(0.135,0,1,0); pb.BackgroundColor3=toolColors.inner; pb.Text=tostring(val); pb.TextColor3=TEXT_COLOR; pb.Font=Enum.Font.GothamBold; pb.TextSize=IS_MOBILE and 13 or 11; Instance.new("UICorner",pb).CornerRadius=UDim.new(0,6)
     pb.MouseButton1Click:Connect(function() snapInput.Text=tostring(val); snapMemory.move=tostring(val); snapMemory.rotate=tostring(val); snapMemory.scale=tostring(val); playUISound() end)
 end
 
-tutorialCard=Instance.new("Frame",scroll); tutorialCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 280 or 240); tutorialCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",tutorialCard).CornerRadius=UDim.new(0,12)
-tutorialTitle=Instance.new("TextLabel",tutorialCard); tutorialTitle.Size=UDim2.new(1,0,0,24); tutorialTitle.Position=UDim2.new(0,0,0,4); tutorialTitle.BackgroundTransparency=1; tutorialTitle.Text=IS_MOBILE and "touch guide" or "keyboard shortcuts (PC)"; tutorialTitle.TextColor3=TEXT_COLOR; tutorialTitle.Font=Enum.Font.GothamBold; tutorialTitle.TextSize=IS_MOBILE and 15 or 13
-tutorialText=Instance.new("TextLabel",tutorialCard); tutorialText.Size=UDim2.new(0.9,0,1,-32); tutorialText.Position=UDim2.new(0.05,0,0,30); tutorialText.BackgroundTransparency=1; tutorialText.TextColor3=TEXT_COLOR; tutorialText.Font=Enum.Font.Gotham; tutorialText.TextSize=IS_MOBILE and 13 or 11; tutorialText.TextXAlignment=Enum.TextXAlignment.Left; tutorialText.TextYAlignment=Enum.TextYAlignment.Top; tutorialText.TextWrapped=true
+local tutorialCard=Instance.new("Frame",scroll); tutorialCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 280 or 240); tutorialCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",tutorialCard).CornerRadius=UDim.new(0,12)
+local tutorialTitle=Instance.new("TextLabel",tutorialCard); tutorialTitle.Size=UDim2.new(1,0,0,24); tutorialTitle.Position=UDim2.new(0,0,0,4); tutorialTitle.BackgroundTransparency=1; tutorialTitle.Text=IS_MOBILE and "touch guide" or "keyboard shortcuts (PC)"; tutorialTitle.TextColor3=TEXT_COLOR; tutorialTitle.Font=Enum.Font.GothamBold; tutorialTitle.TextSize=IS_MOBILE and 15 or 13
+local tutorialText=Instance.new("TextLabel",tutorialCard); tutorialText.Size=UDim2.new(0.9,0,1,-32); tutorialText.Position=UDim2.new(0.05,0,0,30); tutorialText.BackgroundTransparency=1; tutorialText.TextColor3=TEXT_COLOR; tutorialText.Font=Enum.Font.Gotham; tutorialText.TextSize=IS_MOBILE and 13 or 11; tutorialText.TextXAlignment=Enum.TextXAlignment.Left; tutorialText.TextYAlignment=Enum.TextYAlignment.Top; tutorialText.TextWrapped=true
 if IS_MOBILE then
     tutorialText.Text="• Tap SELECT to pick a block.\n• MOVE / ROTATE / SCALE tools.\n• Drag arrows to move.\n• Drag spheres to resize.\n• Drag arcs to rotate.\n• Tap MIRROR (in scale) to mirror.\n• Use ARCH tool to build arches.\n• Tap the BOX icon to toggle box-select mode, then drag to select multiple blocks at once."
 else
     tutorialText.Text="Ctrl+Z  = undo\nCtrl+Y  = redo\n1       = select\n2       = move\n3       = rotate\n4       = scale\nN       = negate mark mode\nDel     = clear selection\nEsc     = close panels\nBox-select icon = toggle box-select mode\n  (drag to select multiple blocks)"
 end
 
-guideCard=Instance.new("Frame",scroll); guideCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 260 or 240); guideCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",guideCard).CornerRadius=UDim.new(0,12)
-guideTitle=Instance.new("TextLabel",guideCard); guideTitle.Size=UDim2.new(1,0,0,24); guideTitle.Position=UDim2.new(0,0,0,4); guideTitle.BackgroundTransparency=1; guideTitle.Text="quick guide"; guideTitle.TextColor3=TEXT_COLOR; guideTitle.Font=Enum.Font.GothamBold; guideTitle.TextSize=IS_MOBILE and 15 or 13
-guideText=Instance.new("TextLabel",guideCard); guideText.Size=UDim2.new(0.9,0,1,-32); guideText.Position=UDim2.new(0.05,0,0,30); guideText.BackgroundTransparency=1; guideText.TextColor3=TEXT_COLOR; guideText.Font=Enum.Font.Gotham; guideText.TextSize=IS_MOBILE and 13 or 11; guideText.TextXAlignment=Enum.TextXAlignment.Left; guideText.TextYAlignment=Enum.TextYAlignment.Top; guideText.TextWrapped=true
+local guideCard=Instance.new("Frame",scroll); guideCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 260 or 240); guideCard.BackgroundColor3=toolColors.cards; Instance.new("UICorner",guideCard).CornerRadius=UDim.new(0,12)
+local guideTitle=Instance.new("TextLabel",guideCard); guideTitle.Size=UDim2.new(1,0,0,24); guideTitle.Position=UDim2.new(0,0,0,4); guideTitle.BackgroundTransparency=1; guideTitle.Text="quick guide"; guideTitle.TextColor3=TEXT_COLOR; guideTitle.Font=Enum.Font.GothamBold; guideTitle.TextSize=IS_MOBILE and 15 or 13
+local guideText=Instance.new("TextLabel",guideCard); guideText.Size=UDim2.new(0.9,0,1,-32); guideText.Position=UDim2.new(0.05,0,0,30); guideText.BackgroundTransparency=1; guideText.TextColor3=TEXT_COLOR; guideText.Font=Enum.Font.Gotham; guideText.TextSize=IS_MOBILE and 13 or 11; guideText.TextXAlignment=Enum.TextXAlignment.Left; guideText.TextYAlignment=Enum.TextYAlignment.Top; guideText.TextWrapped=true
 guideText.Text="1. Select a block with SELECT.\n2. MOVE / ROTATE / SCALE tools.\n3. SCALE + MIRROR to mirror.\n4. COPY duplicates selection.\n5. CONVERT changes block type.\n6. TEXT3D creates 3D text.\n7. ARCH previews and builds arches.\n8. NEGATE marks and cuts blocks.\n9. BOX icon = toggle box-select mode;\n   drag to select many blocks at once.\n10. Multi-select label shown during box-select."
 
-killCard=Instance.new("Frame",scroll); killCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 80 or 65); killCard.BackgroundColor3=colorEliminarCard; Instance.new("UICorner",killCard)
-killLab=Instance.new("TextLabel",killCard); killLab.Size=UDim2.new(0.6,0,1,0); killLab.BackgroundTransparency=1; killLab.Font=Enum.Font.GothamBold; killLab.Text="delete script"; killLab.TextColor3=TEXT_COLOR; killLab.TextSize=IS_MOBILE and 16 or 15
-killBtnReal=Instance.new("TextButton",killCard); killBtnReal.Size=UDim2.new(0.32,0,0.75,0); killBtnReal.Position=UDim2.new(0.65,0,0.125,0); killBtnReal.BackgroundColor3=colorBotonEliminarReal; killBtnReal.Text="delete"; killBtnReal.Font=Enum.Font.GothamBold; killBtnReal.TextColor3=TEXT_COLOR; killBtnReal.TextSize=IS_MOBILE and 14 or 12; Instance.new("UICorner",killBtnReal)
+local killCard=Instance.new("Frame",scroll); killCard.Size=UDim2.new(0.95,0,0,IS_MOBILE and 80 or 65); killCard.BackgroundColor3=colorEliminarCard; Instance.new("UICorner",killCard)
+local killLab=Instance.new("TextLabel",killCard); killLab.Size=UDim2.new(0.6,0,1,0); killLab.BackgroundTransparency=1; killLab.Font=Enum.Font.GothamBold; killLab.Text="delete script"; killLab.TextColor3=TEXT_COLOR; killLab.TextSize=IS_MOBILE and 16 or 15
+local killBtnReal=Instance.new("TextButton",killCard); killBtnReal.Size=UDim2.new(0.32,0,0.75,0); killBtnReal.Position=UDim2.new(0.65,0,0.125,0); killBtnReal.BackgroundColor3=colorBotonEliminarReal; killBtnReal.Text="delete"; killBtnReal.Font=Enum.Font.GothamBold; killBtnReal.TextColor3=TEXT_COLOR; killBtnReal.TextSize=IS_MOBILE and 14 or 12; Instance.new("UICorner",killBtnReal)
 killBtnReal.MouseButton1Click:Connect(killUI)
 
-creditsFrame=Instance.new("Frame",scroll); creditsFrame.Size=UDim2.new(0.95,0,0,IS_MOBILE and 100 or 80); creditsFrame.BackgroundColor3=toolColors.cards; Instance.new("UICorner",creditsFrame).CornerRadius=UDim.new(0,12)
-creditTxt=Instance.new("TextLabel",creditsFrame); creditTxt.Size=UDim2.new(0.9,0,0.8,0); creditTxt.Position=UDim2.new(0.05,0,0.1,0); creditTxt.BackgroundTransparency=1; creditTxt.Font=Enum.Font.GothamBold; creditTxt.TextSize=IS_MOBILE and 14 or 13; creditTxt.TextColor3=TEXT_COLOR; creditTxt.TextWrapped=true; creditTxt.Text="script made by el_jorjao910 or elitx\nusername in discord: un_sipote_con_esquizofrenia"
-discordBlock=Instance.new("ImageButton",scroll); discordBlock.Size=UDim2.new(0.95,0,0,IS_MOBILE and 120 or 100); discordBlock.BackgroundColor3=toolColors.cards; discordBlock.AutoButtonColor=false; Instance.new("UICorner",discordBlock).CornerRadius=UDim.new(0,15)
-discordImg=Instance.new("ImageLabel",discordBlock); discordImg.Size=UDim2.fromOffset(70,70); discordImg.Position=UDim2.new(0.05,0,0.5,-35); discordImg.BackgroundTransparency=1; discordImg.Image="rbxassetid://"..iconIds.discord; discordImg.ScaleType=Enum.ScaleType.Fit
-discordTextContainer=Instance.new("Frame",discordBlock); discordTextContainer.Size=UDim2.new(0.7,0,1,-10); discordTextContainer.Position=UDim2.new(0.28,0,0,5); discordTextContainer.BackgroundTransparency=1; Instance.new("UIListLayout",discordTextContainer).VerticalAlignment=Enum.VerticalAlignment.Center; discordTextContainer.UIListLayout.Padding=UDim.new(0,5)
-dServerLab=Instance.new("TextLabel",discordTextContainer); dServerLab.Size=UDim2.new(1,0,0,25); dServerLab.BackgroundTransparency=1; dServerLab.Font=Enum.Font.GothamBold; dServerLab.TextSize=IS_MOBILE and 17 or 16; dServerLab.TextColor3=TEXT_COLOR; dServerLab.Text="join our discord server!"; dServerLab.TextXAlignment=Enum.TextXAlignment.Left
-dLinkLab=Instance.new("TextLabel",discordTextContainer); dLinkLab.Size=UDim2.new(1,-10,0,30); dLinkLab.BackgroundColor3=colorInfo; dLinkLab.Font=Enum.Font.GothamBold; dLinkLab.TextSize=IS_MOBILE and 15 or 14; dLinkLab.TextColor3=Color3.new(1,1,1); dLinkLab.Text=discordLink; Instance.new("UICorner",dLinkLab).CornerRadius=UDim.new(0,8)
+local creditsFrame=Instance.new("Frame",scroll); creditsFrame.Size=UDim2.new(0.95,0,0,IS_MOBILE and 100 or 80); creditsFrame.BackgroundColor3=toolColors.cards; Instance.new("UICorner",creditsFrame).CornerRadius=UDim.new(0,12)
+local creditTxt=Instance.new("TextLabel",creditsFrame); creditTxt.Size=UDim2.new(0.9,0,0.8,0); creditTxt.Position=UDim2.new(0.05,0,0.1,0); creditTxt.BackgroundTransparency=1; creditTxt.Font=Enum.Font.GothamBold; creditTxt.TextSize=IS_MOBILE and 14 or 13; creditTxt.TextColor3=TEXT_COLOR; creditTxt.TextWrapped=true; creditTxt.Text="script made by el_jorjao910 or elitx\nusername in discord: un_sipote_con_esquizofrenia"
+local discordBlock=Instance.new("ImageButton",scroll); discordBlock.Size=UDim2.new(0.95,0,0,IS_MOBILE and 120 or 100); discordBlock.BackgroundColor3=toolColors.cards; discordBlock.AutoButtonColor=false; Instance.new("UICorner",discordBlock).CornerRadius=UDim.new(0,15)
+local discordImg=Instance.new("ImageLabel",discordBlock); discordImg.Size=UDim2.fromOffset(70,70); discordImg.Position=UDim2.new(0.05,0,0.5,-35); discordImg.BackgroundTransparency=1; discordImg.Image="rbxassetid://"..iconIds.discord; discordImg.ScaleType=Enum.ScaleType.Fit
+local discordTextContainer=Instance.new("Frame",discordBlock); discordTextContainer.Size=UDim2.new(0.7,0,1,-10); discordTextContainer.Position=UDim2.new(0.28,0,0,5); discordTextContainer.BackgroundTransparency=1; Instance.new("UIListLayout",discordTextContainer).VerticalAlignment=Enum.VerticalAlignment.Center; discordTextContainer.UIListLayout.Padding=UDim.new(0,5)
+local dServerLab=Instance.new("TextLabel",discordTextContainer); dServerLab.Size=UDim2.new(1,0,0,25); dServerLab.BackgroundTransparency=1; dServerLab.Font=Enum.Font.GothamBold; dServerLab.TextSize=IS_MOBILE and 17 or 16; dServerLab.TextColor3=TEXT_COLOR; dServerLab.Text="join our discord server!"; dServerLab.TextXAlignment=Enum.TextXAlignment.Left
+local dLinkLab=Instance.new("TextLabel",discordTextContainer); dLinkLab.Size=UDim2.new(1,-10,0,30); dLinkLab.BackgroundColor3=colorInfo; dLinkLab.Font=Enum.Font.GothamBold; dLinkLab.TextSize=IS_MOBILE and 15 or 14; dLinkLab.TextColor3=Color3.new(1,1,1); dLinkLab.Text=discordLink; Instance.new("UICorner",dLinkLab).CornerRadius=UDim.new(0,8)
 discordBlock.MouseButton1Click:Connect(function() setclipboard(discordLink); dLinkLab.Text="copied!"; task.wait(2); dLinkLab.Text=discordLink end)
 
 function closeSettingsPanel()
@@ -2847,9 +2771,11 @@ end
 
 outline=Instance.new("SelectionBox",workspace); outline.Name="PAT_Outline"; trackInst(outline); outline.LineThickness=outlineThickness; outline.Color3=toolColors.selectionBox
 handles={m=nil,r=nil,s=nil}
+visualDraggers = { move = nil }
 
 function clearH(full)
     for k,v in pairs(handles) do if v then v:Destroy(); handles[k]=nil end end
+    if visualDraggers.move then visualDraggers.move:SetAdornee(nil) end
     if full then
         targetPart=nil; selectedObjects={}; outline.Adornee=nil; crosshair.Visible=false; currentMode="None"; updateGridUI(false)
         if boxSelectModeEnabled then setBoxSelectMode(false); if boxSelectEditorWrap then boxSelectEditorWrap.BackgroundColor3=toolColors.cards end end
@@ -2892,17 +2818,39 @@ function activateMove()
     clearH(false); currentMode="move"; snapInput.Text=snapMemory.move; utilityBtn.Visible=not isBarHidden; updateGridUI(true)
     utilityBtn.Text=useGlobalSpace and "mode: global" or "mode: local"
     outline.Color3=toolColors.move
-    local h=Instance.new("Handles",HandlesParent); h.Adornee=proxyPart; h.Style=Enum.HandlesStyle.Movement; h.Color3=toolColors.move
-    applyFocus(h,false,function() end); handles.m=h
-    h.MouseDrag:Connect(function(f,d)
+
+    if not visualDraggers.move then 
+        visualDraggers.move = ArrowDragger.new()
+        visualDraggers.move:SetParent(MainUI)
+    end
+    visualDraggers.move:SetAdornee(proxyPart)
+
+    if visualDraggers.move._downConn then visualDraggers.move._downConn:Disconnect() end
+    visualDraggers.move._downConn = visualDraggers.move.MouseButton1Down:Connect(function(axis)
+        lastHandleDownTick=tick()
+        saveState(); saveOriginalTransparencies(); setObjectsTransparency(0.3)
+        isDragging=true; lockCamera()
+        updateProxy()
+        startPivot=proxyPart.CFrame; originalCFrames={}
+        for _,obj in ipairs(selectedObjects) do originalCFrames[obj]=obj:GetPivot() end
+    end)
+
+    if visualDraggers.move._dragConn then visualDraggers.move._dragConn:Disconnect() end
+    visualDraggers.move._dragConn = visualDraggers.move.MouseDrag:Connect(function(normalId, d)
         local s=tonumber(snapInput.Text) or 0.5; if s<=0 then s=0.01 end
         local snap=math.floor(d/s+0.5)*s
-        local normalId=Vector3.FromNormalId(f)
         local dirWorld=useGlobalSpace and normalId or (startPivot and startPivot:VectorToWorldSpace(normalId) or normalId)
         for _,obj in ipairs(selectedObjects) do
             local originalCF=originalCFrames[obj]; if originalCF then obj:PivotTo(originalCF+(dirWorld*snap)); syncFilter(obj) end
         end
         proxyDirty=true
+    end)
+
+    if visualDraggers.move._upConn then visualDraggers.move._upConn:Disconnect() end
+    visualDraggers.move._upConn = visualDraggers.move.MouseButton1Up:Connect(function()
+        isDragging=false; restoreTransparencies(); unlockCamera()
+        for _,obj in ipairs(selectedObjects) do forceUpdate(obj,currentMode) end
+        originalCFrames={}; proxyDirty=true
     end)
 end
 
@@ -3000,7 +2948,8 @@ textPanel=nil; closeTextPanelFn=nil
 function isSelectableHit(inst)
     if not inst then return false end
     if inst:IsA("Terrain") then return false end
-    if isPlayerObject(inst) then return false end
+    local model=inst:FindFirstAncestorOfClass("Model")
+    if model and model:FindFirstChildOfClass("Humanoid") then return false end
     return true
 end
 
@@ -3043,7 +2992,7 @@ function raycastFromScreen(pos)
     local ray=inputRay(pos)
     local params=RaycastParams.new()
     params.FilterType=Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances=getIgnoreList()
+    params.FilterDescendantsInstances={lp.Character,proxyPart,rotateProxy,negateProxy,globalMoveProxy}
     return workspace:Raycast(ray.Origin,ray.Direction*1000,params)
 end
 
@@ -3063,7 +3012,7 @@ createTool(iconIds.select,function()
         local center=Vector2.new(cam.ViewportSize.X/2,cam.ViewportSize.Y/2)
         local unitRay=cam:ViewportPointToRay(center.X,center.Y)
         local params=RaycastParams.new()
-        params.FilterDescendantsInstances=getIgnoreList()
+        params.FilterDescendantsInstances={lp.Character,proxyPart,rotateProxy,negateProxy,globalMoveProxy}
         params.FilterType=Enum.RaycastFilterType.Exclude
         local result=workspace:Raycast(unitRay.Origin,unitRay.Direction*1000,params)
         if result and result.Instance and isSelectableHit(result.Instance) then
@@ -3077,7 +3026,8 @@ track(Services.UserInput.InputBegan:Connect(function(input,processed)
     if negateMode and (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) then
         local result=raycastFromScreen(input.Position)
         if result and result.Instance then
-            toggleNegate(result.Instance); playUISound()
+            local realTarget=getRealTarget(result.Instance)
+            if realTarget then markNegate(realTarget); playUISound() end
         end
         return
     end
@@ -3870,15 +3820,6 @@ track(Services.Run.RenderStepped:Connect(function()
     if panelDirty then updatePanel(); panelDirty=false end
     if currentMode=="rotate" and targetPart and not isDragging then
         rotateProxy.Size=proxyPart.Size; rotateProxy.CFrame=proxyPart.CFrame
-    end
-    if handles.m then
-        local adn=nil
-        if currentMode=="move" and show then
-            if useGlobalSpace then
-                globalMoveProxy.Size=worldExtents(proxyPart.CFrame,proxyPart.Size); globalMoveProxy.CFrame=CFrame.new(proxyPart.Position); adn=globalMoveProxy
-            else adn=proxyPart end
-        end
-        handles.m.Adornee=adn
     end
     if handles.r then handles.r.Adornee=(currentMode=="rotate" and show) and rotateProxy or nil end
     if currentMode~="select" then
