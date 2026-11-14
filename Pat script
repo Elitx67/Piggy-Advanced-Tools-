@@ -218,7 +218,7 @@ local ArrowDragger = {}
 ArrowDragger.__index = ArrowDragger
 setmetatable(ArrowDragger, BaseAdornment)
 
-local function computeDraggedDistance(p5, p6, p7)
+local function computeDraggedDistanceArrow(p5, p6, p7)
     local v8 = p7.Origin
     local v9 = p7.Direction.Unit
     local v10 = p6:Cross((v8 - p5).Unit)
@@ -267,28 +267,28 @@ function ArrowDragger.new(_)
     v_u_21.Faces = Enum.NormalId:GetEnumItems()
     local v_u_25 = {}
     local v_u_26 = nil
-    
+
     for v_u_27, v28 in Enum.NormalId:GetEnumItems() do
         local v29 = Instance.new("ConeHandleAdornment")
         v29.Parent = v_u_21._Instance; v29.ZIndex = 1; v29.AlwaysOnTop = true
         local v30 = Instance.new("CylinderHandleAdornment")
         v30.Parent = v_u_21._Instance; v30.ZIndex = 0; v30.AlwaysOnTop = true
-        
+
         local c = getArrowColor(v28)
         v29.Color3 = c
         v30.Color3 = c
-        
+
         local v_u_31 = Vector3.fromNormalId(v28)
         local v_u_32 = { mouseHovering = false, mouseDown = false, cylinderHandle = v30, coneHandle = v29, direction = v_u_31, face = v28.Name, scale = v_u_14.None.Scale }
         v_u_25[v_u_27] = v_u_32
         updateHandles(v_u_32)
-        
+
         for _, v_u_33 in { v29, v30 } do
             v_u_33.MouseEnter:Connect(function() if v_u_21._Adornee then v_u_32.mouseHovering = true; updateHandles(v_u_25[v_u_27]) end end)
             v_u_33.MouseLeave:Connect(function() if v_u_21._Adornee then v_u_32.mouseHovering = false; updateHandles(v_u_25[v_u_27]) end end)
             v_u_33.MouseButton1Down:Connect(function()
                 if v_u_21._Adornee then
-                    v_u_21._PreviousCameraType = workspace.CurrentCamera.CameraType
+                    if lockCamera then lockCamera() end
                     v_u_32.mouseDown = true
                     updateHandles(v_u_25[v_u_27])
                     v_u_23:Fire(v_u_31)
@@ -305,12 +305,9 @@ function ArrowDragger.new(_)
                                 local v40 = Services.UserInput:GetMouseLocation()
                                 local v41 = workspace.CurrentCamera:ViewportPointToRay(v40.X, v40.Y).Unit
                                 local v42 = Ray.new(v41.Origin, v41.Direction * 10000)
-                                local v43, v44 = computeDraggedDistance(v_u_36.Position, v39, v42)
+                                local v43, v44 = computeDraggedDistanceArrow(v_u_36.Position, v39, v42)
                                 if v43 then
                                     v_u_22:Fire(v_u_31, v44 - v_u_34:ToObjectSpace(v_u_36).Position.Magnitude)
-                                    if p38.UserInputType == Enum.UserInputType.Touch then
-                                        workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
-                                    end
                                 end
                             end
                         end)
@@ -320,7 +317,7 @@ function ArrowDragger.new(_)
             table.insert(v_u_21._Handles, v_u_33)
         end
     end
-    
+
     v_u_21._Connections = {
         Services.UserInput.InputEnded:Connect(function(p46, _)
             if p46.UserInputType == Enum.UserInputType.MouseButton1 or p46.UserInputType == Enum.UserInputType.Touch then
@@ -332,7 +329,7 @@ function ArrowDragger.new(_)
                         v_u_24:Fire(v48.direction)
                     end
                 end
-                if v_u_21._PreviousCameraType then workspace.CurrentCamera.CameraType = v_u_21._PreviousCameraType end
+                if unlockCamera then unlockCamera() end
                 if v_u_26 then v_u_26:Disconnect(); v_u_26 = nil end
             end
         end),
@@ -430,10 +427,6 @@ local function clampPanelSize(w, h)
     local maxH = math.max(120, vps.Y - m * 2)
     return math.min(w, maxW), math.min(h, maxH)
 end
-local function getInfoPanelHideOffset()
-    if not infoPanel then return 300 end
-    return infoPanel.Size.X.Offset + 20
-end
 function getBarLift() return IS_MOBILE and 10 or 20 end
 
 useGlobalSpace = false
@@ -461,7 +454,6 @@ alwaysSnap = false
 showCoords = false
 fastBuild = true
 maxUndo = 200
-uiOpacity = 1.0
 handleScaleMul = 1.0
 lockCamOnDrag = true
 toolbarEdge = "bottom"
@@ -657,7 +649,7 @@ function updateProxy()
     if #selectedObjects == 1 then
         local obj = selectedObjects[1]
         local cf, size = getBoundsOf(obj)
-        if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
+        if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z
            and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
             proxyPart.Size = size; proxyPart.CFrame = cf; return
         else
@@ -667,13 +659,13 @@ function updateProxy()
     local minX, minY, minZ = math.huge, math.huge, math.huge
     local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
     local validCount = 0
-    
+
     for _, obj in ipairs(selectedObjects) do
         local cf, size
         if obj:IsA("Model") then cf, size = getModelVisualBox(obj)
         elseif obj:IsA("BasePart") then cf, size = obj.CFrame, obj.Size end
-        
-        if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
+
+        if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z
            and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
             validCount = validCount + 1
             local corners = {
@@ -696,11 +688,11 @@ function updateProxy()
             end
         end
     end
-    
-    if validCount == 0 or minX == math.huge or minX ~= minX then 
-        proxyPart.CFrame = CFrame.new(0, 10000, 0); return 
+
+    if validCount == 0 or minX == math.huge or minX ~= minX then
+        proxyPart.CFrame = CFrame.new(0, 10000, 0); return
     end
-    
+
     proxyPart.Size = Vector3.new(maxX-minX, maxY-minY, maxZ-minZ)
     proxyPart.CFrame = CFrame.new((minX+maxX)/2, (minY+maxY)/2, (minZ+maxZ)/2)
 end
@@ -726,44 +718,50 @@ function syncFilter(target)
     end
 end
 
-local moveTimestamps = {}
+moveTimestamps = {}
 
 function forceUpdate(target, mode)
     if not target then return end
     local functions = Services.Replicated:FindFirstChild("Functions", true)
     if not functions then return end
     local container = (target.Name == "ColorPart" or target.Name == "MouseFilterPart" or target.Name == "base") and target.Parent or target
-    
+
     if mode == "move" or mode == "rotate" then
         local commitMove = functions:FindFirstChild("CommitMove")
-        if commitMove then 
+        if commitMove then
             local expectedCF = container:GetPivot()
             local originalCF = container:GetAttribute("PAT_LastCF") or expectedCF
             container:SetAttribute("PAT_LastCF", expectedCF)
-            pcall(function() commitMove:InvokeServer(container, expectedCF) end) 
+            pcall(function() commitMove:InvokeServer(container, expectedCF) end)
             local currentTimestamp = tick()
             moveTimestamps[container] = currentTimestamp
             task.delay(0.6, function()
-                if container and container.Parent and moveTimestamps[container] == currentTimestamp then
-                    local actualCF = container:GetPivot()
-                    if (actualCF.Position - originalCF.Position).Magnitude < 0.1 and (expectedCF.Position - originalCF.Position).Magnitude > 0.1 then
-                        showToast("Server rejected the move (Out of bounds)", colorEliminarCard)
+                if moveTimestamps[container] == currentTimestamp then
+                    moveTimestamps[container] = nil
+                    if container and container.Parent then
+                        local actualCF = container:GetPivot()
+                        if (actualCF.Position - originalCF.Position).Magnitude < 0.1 and (expectedCF.Position - originalCF.Position).Magnitude > 0.1 then
+                            showToast("Server rejected the move (Out of bounds)", colorEliminarCard)
+                        end
                     end
                 end
             end)
         end
     elseif mode == "scale" or mode == "mirrorCopy" then
         local ok, finalSize = pcall(function() return getObjSize(container) end)
-        if ok and finalSize then 
-            invokeResize(container, container:GetPivot(), finalSize) 
+        if ok and finalSize then
+            invokeResize(container, container:GetPivot(), finalSize)
             local expectedSize = finalSize
             local currentTimestamp = tick()
             moveTimestamps[container] = currentTimestamp
             task.delay(0.6, function()
-                if container and container.Parent and moveTimestamps[container] == currentTimestamp then
-                    local actualSize = getObjSize(container)
-                    if (actualSize - expectedSize).Magnitude > 0.1 then
-                        showToast("Server rejected the resize (Limit reached)", colorEliminarCard)
+                if moveTimestamps[container] == currentTimestamp then
+                    moveTimestamps[container] = nil
+                    if container and container.Parent then
+                        local actualSize = getObjSize(container)
+                        if (actualSize - expectedSize).Magnitude > 0.1 then
+                            showToast("Server rejected the resize (Limit reached)", colorEliminarCard)
+                        end
                     end
                 end
             end)
@@ -874,12 +872,12 @@ function showToast(text, bgColor)
     toast.TextWrapped = true
     toast.ZIndex = 100
     Instance.new("UICorner", toast).CornerRadius = UDim.new(0, 8)
-    
+
     toast.Position = UDim2.new(0, 0, 0, -50)
     toast.Visible = true
-    
+
     Services.Tweens:Create(toast, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0,0,0,0)}):Play()
-    
+
     task.delay(3, function()
         if toast and toast.Parent then
             local outTween = Services.Tweens:Create(toast, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Position = UDim2.new(0,0,0,-50), BackgroundTransparency = 1, TextTransparency = 1})
@@ -927,7 +925,9 @@ end
 camPrevType = nil
 function lockCamera()
     if not lockCamOnDrag then return end
-    if camPrevType == nil then camPrevType = cam.CameraType end
+    if camPrevType == nil and cam.CameraType ~= Enum.CameraType.Scriptable then
+        camPrevType = cam.CameraType
+    end
     cam.CameraType = Enum.CameraType.Scriptable
 end
 function unlockCamera()
@@ -1324,6 +1324,7 @@ function finishCustomRotate()
     isDragging=false; restoreTransparencies(); unlockCamera()
     for _,obj in ipairs(selectedObjects) do forceUpdate(obj,currentMode) end
     originalCFrames={}; proxyDirty=true
+    updateProxy()
     PAT_RotatorV2:Update()
 end
 
@@ -2074,10 +2075,10 @@ local convertButtons = {}
 
 local function updateConvertList()
     local search = string.lower(tostring(searchBox.Text or ""))
-    
+
     for _, btn in ipairs(convertButtons) do btn:Destroy() end
     convertButtons = {}
-    
+
     local sorted = {}
     for _, data in ipairs(defaultBlocks) do
         if data.Path and data.Path.Parent then
@@ -2088,19 +2089,19 @@ local function updateConvertList()
             end
         end
     end
-    
+
     table.sort(sorted, function(a, b)
         if a.isFav and not b.isFav then return true end
         if not a.isFav and b.isFav then return false end
         return a.data.Name < b.data.Name
     end)
-    
+
     for _, item in ipairs(sorted) do
         local row = Instance.new("Frame", convertScroll)
         row.Size = UDim2.new(1, 0, 0, IS_MOBILE and 46 or 38)
         row.BackgroundColor3 = toolColors.cards
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
-        
+
         local btn = Instance.new("TextButton", row)
         btn.Size = UDim2.new(1, -40, 1, 0)
         btn.BackgroundTransparency = 1
@@ -2110,7 +2111,7 @@ local function updateConvertList()
         btn.TextSize = IS_MOBILE and 13 or 11
         btn.TextXAlignment = Enum.TextXAlignment.Left
         btn.MouseButton1Click:Connect(function() performConvert(item.data.Path) end)
-        
+
         local starBtn = Instance.new("TextButton", row)
         starBtn.Size = UDim2.fromOffset(36, 36)
         starBtn.Position = UDim2.new(1, -36, 0.5, 0)
@@ -2125,7 +2126,7 @@ local function updateConvertList()
             playUISound()
             updateConvertList()
         end)
-        
+
         table.insert(convertButtons, row)
     end
 end
@@ -2220,14 +2221,6 @@ editorToggleBtn.MouseButton1Click:Connect(function()
     if isEditorHidden then editorToggleBtn.Text="<"; Services.Tweens:Create(infoPanel,tInfo,{Position=UDim2.new(1,offX,0.5,0)}):Play()
     else editorToggleBtn.Text=">"; Services.Tweens:Create(infoPanel,tInfo,{Position=UDim2.new(1,-20,0.5,0)}):Play(); updatePanel() end
 end)
-
-function sync(target)
-    if not target or not target.Parent then return end
-    local container=target:IsA("Model") and target or target.Parent; local currentCF=target:IsA("Model") and target:GetPivot() or target.CFrame
-    local filter=container:FindFirstChild("MouseFilterPart"); if filter and filter:IsA("BasePart") then filter.CFrame=currentCF; if container:FindFirstChild("ColorPart") and target:IsA("BasePart") then filter.Size=target.Size end end
-    local basePart=container:FindFirstChild("base"); if basePart and basePart:IsA("BasePart") then basePart.CFrame=currentCF; if container:FindFirstChild("ColorPart") and target:IsA("BasePart") then basePart.Size=target.Size end end
-    updatePanel(); updateProxy()
-end
 
 crosshair=Instance.new("Frame",MainUI); crosshair.Size=UDim2.fromOffset(16,16); crosshair.Position=UDim2.fromScale(0.5,0.5); crosshair.AnchorPoint=Vector2.new(0.5,0.5); crosshair.BackgroundTransparency=1; crosshair.Visible=false
 local function createLine(sz,pos) local f=Instance.new("Frame",crosshair); f.Size=sz; f.Position=pos; f.AnchorPoint=Vector2.new(0.5,0.5); f.BackgroundColor3=Color3.new(1,1,1); f.BorderSizePixel=0; return f end
@@ -2423,7 +2416,7 @@ local MAX_BOX_SELECT = 250
 
 local function updateLiveBoxSelect()
     local now = tick()
-    local throttle = IS_MOBILE and 0.25 or 0.15 
+    local throttle = IS_MOBILE and 0.25 or 0.15
     if now - _bsLastUpdate < throttle then return end
     _bsLastUpdate = now
 
@@ -2439,10 +2432,10 @@ local function updateLiveBoxSelect()
     local count = 0
 
     local buildModel = workspace:FindFirstChild("BuildModel") or workspace
-    
+
     for _, obj in ipairs(buildModel:GetDescendants()) do
         if count >= MAX_BOX_SELECT then break end
-        
+
         if obj:IsA("Model") or obj:IsA("BasePart") then
             local isSelectable = true
             if obj:FindFirstChildOfClass("Humanoid") then isSelectable = false end
@@ -2461,14 +2454,14 @@ local function updateLiveBoxSelect()
                     cf, size = obj.CFrame, obj.Size
                 end
 
-                if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z 
+                if cf and size and size.X == size.X and size.Y == size.Y and size.Z == size.Z
                    and size.X ~= math.huge and size.Y ~= math.huge and size.Z ~= math.huge then
-                    
+
                     local centerPos, centerOnScreen = cam:WorldToViewportPoint(cf.Position)
                     if centerOnScreen and centerPos.X == centerPos.X and centerPos.Y == centerPos.Y then
                         local margin = math.max(size.X, size.Y, size.Z) * 50
                         if centerPos.X + margin > minX and centerPos.X - margin < maxX and centerPos.Y + margin > minY and centerPos.Y - margin < maxY then
-                            
+
                             local intersects = false
                             local corners = {
                                 cf * CFrame.new( size.X/2,  size.Y/2,  size.Z/2),
@@ -2819,7 +2812,7 @@ function activateMove()
     utilityBtn.Text=useGlobalSpace and "mode: global" or "mode: local"
     outline.Color3=toolColors.move
 
-    if not visualDraggers.move then 
+    if not visualDraggers.move then
         visualDraggers.move = ArrowDragger.new()
         visualDraggers.move:SetParent(MainUI)
     end
@@ -3846,5 +3839,62 @@ track(Services.UserInput.InputEnded:Connect(function(input)
         if moved<=(IS_MOBILE and 18 or 8) and (tick()-rec.t0)<=0.6 and not onHandle and tapSelectAllowed() then
             tryTapSelect(Vector2.new(rec.x,rec.y))
         end
+    end
+end))
+
+local sizeTip = Instance.new("TextLabel", MainUI)
+sizeTip.Name = "PAT_SizeTip"
+sizeTip.Size = UDim2.fromOffset(170, 34)
+sizeTip.BackgroundColor3 = Color3.fromHex("1A1A1A")
+sizeTip.BackgroundTransparency = 0.15
+sizeTip.TextColor3 = Color3.new(1, 1, 1)
+sizeTip.Font = Enum.Font.GothamBold
+sizeTip.TextSize = IS_MOBILE and 17 or 14
+sizeTip.BorderSizePixel = 0
+sizeTip.ZIndex = 50
+sizeTip.Visible = false
+sizeTip.Text = "0, 0, 0"
+Instance.new("UICorner", sizeTip).CornerRadius = UDim.new(0, 8)
+local sizeTipStroke = Instance.new("UIStroke", sizeTip)
+sizeTipStroke.Color = Color3.fromHex("FFA3A3")
+sizeTipStroke.Thickness = 1.5
+
+local function fmtDim(v)
+    local r = math.floor(v * 100 + 0.5) / 100
+    if math.abs(r - math.floor(r + 0.5)) < 0.001 then
+        return tostring(math.floor(r + 0.5))
+    end
+    return string.format("%.2f", r)
+end
+
+track(Services.UserInput.InputChanged:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+       and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+    if not isDragging or currentMode ~= "scale" then
+        if sizeTip.Visible then sizeTip.Visible = false end
+        return
+    end
+
+    local size = proxyPart.Size
+    if size.X ~= size.X or size.Y ~= size.Y or size.Z ~= size.Z then return end
+
+    sizeTip.Text = fmtDim(size.X) .. ", " .. fmtDim(size.Y) .. ", " .. fmtDim(size.Z)
+
+    local vps = getViewport()
+    local pad = 8
+    local offx = IS_MOBILE and 30 or 22
+    local offy = IS_MOBILE and -62 or -48
+    sizeTip.Position = UDim2.fromOffset(
+        math.clamp(input.Position.X + offx, pad, vps.X - sizeTip.Size.X.Offset - pad),
+        math.clamp(input.Position.Y + offy, pad, vps.Y - sizeTip.Size.Y.Offset - pad)
+    )
+    sizeTip.Visible = true
+end))
+
+track(Services.UserInput.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+       or input.UserInputType == Enum.UserInputType.Touch then
+        sizeTip.Visible = false
     end
 end))
