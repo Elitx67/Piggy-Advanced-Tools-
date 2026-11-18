@@ -1461,10 +1461,23 @@ end
 
 infoPanel = Instance.new("Frame", MainUI)
 infoPanel.Name = "InfoPanel"
-local infoW = IS_MOBILE and math.clamp(getViewport().X * 0.92, 260, 340) or 300
-local infoH = IS_MOBILE and math.clamp(getViewport().Y * 0.85, 480, 700) or 520
+local _vps = getViewport()
+local _isSmallPhone = IS_MOBILE and math.min(_vps.X, _vps.Y) < 500
+
+-- Ancho: en móvil reducido para no cubrir la pantalla, pero no tan estrecho
+local infoW = IS_MOBILE and math.clamp(_vps.X * (_isSmallPhone and 0.60 or 0.72), 220, 300) or 300
+
+-- Alto: calculado sumando los elementos internos exactos para que todos quepan dentro del panel.
+-- Elementos: título(24) + preview(90) + 3 inputs(38*3=114) + topToolRow(44) + historyRow(44)
+-- + padding top/bottom(8+8) + gaps UIListLayout(8*5=40) = 24+90+114+44+44+16+40 = 372
+-- Le damos +20 de margen para que no quede apretado.
+-- En PC se mantiene el valor original 520.
+local _innerH_mobile = _isSmallPhone and 380 or 400
+local infoH = IS_MOBILE and _innerH_mobile or 520
+
 infoW, infoH = clampPanelSize(infoW, infoH)
 infoPanel.Size = UDim2.fromOffset(infoW, infoH)
+-- Siempre centrado verticalmente a la derecha, igual en móvil y PC.
 infoPanel.Position = UDim2.new(1, infoW + 20, 0.5, 0)
 infoPanel.AnchorPoint = Vector2.new(1, 0.5)
 infoPanel.BackgroundColor3 = Color3.fromHex("FF8E8E")
@@ -1490,13 +1503,14 @@ infoContent.Name = "Content"
 infoContent.Size = UDim2.new(1, 0, 1, 0)
 infoContent.BackgroundTransparency = 1
 local infoPad = Instance.new("UIPadding", infoContent)
-infoPad.PaddingTop = UDim.new(0, 8)
-infoPad.PaddingBottom = UDim.new(0, 8)
-infoPad.PaddingLeft = UDim.new(0, 8)
-infoPad.PaddingRight = UDim.new(0, 8)
+local _iPad = IS_MOBILE and 5 or 8
+infoPad.PaddingTop = UDim.new(0, _iPad)
+infoPad.PaddingBottom = UDim.new(0, _iPad)
+infoPad.PaddingLeft = UDim.new(0, _iPad)
+infoPad.PaddingRight = UDim.new(0, _iPad)
 
 local infoLayout = Instance.new("UIListLayout", infoContent)
-infoLayout.Padding = UDim.new(0, 8)
+infoLayout.Padding = UDim.new(0, IS_MOBILE and 4 or 8)
 infoLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 infoLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
@@ -1508,7 +1522,7 @@ titleLab.TextColor3=TEXT_COLOR; titleLab.BackgroundTransparency=1
 
 innerPanel = Instance.new("Frame",infoContent)
 innerPanel.LayoutOrder = 2
-innerPanel.Size = UDim2.new(1,0,0,IS_MOBILE and 160 or 180)
+innerPanel.Size = UDim2.new(1,0,0,IS_MOBILE and (_isSmallPhone and 85 or 100) or 180)
 innerPanel.BackgroundColor3 = colorRow
 innerPanel.BorderSizePixel = 0
 innerPanel.ClipsDescendants = true
@@ -1533,7 +1547,7 @@ viewFrame.CurrentCamera = viewCam
 
 dataContainer = Instance.new("Frame",infoContent)
 dataContainer.LayoutOrder = 3
-dataContainer.Size = UDim2.new(1,0,0,IS_MOBILE and 130 or 110)
+dataContainer.Size = UDim2.new(1,0,0,IS_MOBILE and (_isSmallPhone and 108 or 118) or 110)
 dataContainer.BackgroundTransparency = 1
 local dcLayout = Instance.new("UIListLayout",dataContainer)
 dcLayout.Padding = UDim.new(0,4)
@@ -2710,19 +2724,33 @@ end
 inPos.FocusLost:Connect(applyManual); inRot.FocusLost:Connect(applyManual); inSize.FocusLost:Connect(applyManual)
 
 isEditorHidden=false
+
+-- Devuelve la posición "visible" y "oculta" del infoPanel.
+-- Siempre centrado verticalmente (0.5) en todos los dispositivos.
+local function getInfoPanelPositions()
+    local offX = infoPanel.Size.X.Offset + 20
+    return UDim2.new(1, -20, 0.5, 0), UDim2.new(1, offX, 0.5, 0)
+end
+
 function togglePanel(show)
     if isEditorHidden then return end
-    local offX=infoPanel.Size.X.Offset+20
-    local targetPos=show and UDim2.new(1,-20,0.5,0) or UDim2.new(1,offX,0.5,0)
+    local visPos, hidPos = getInfoPanelPositions()
+    local targetPos = show and visPos or hidPos
     Services.Tweens:Create(infoPanel,TweenInfo.new(0.5,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Position=targetPos}):Play()
 end
 
 editorToggleBtn.MouseButton1Click:Connect(function()
     isEditorHidden=not isEditorHidden; playUISound()
     local tInfo=TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out)
-    local offX=infoPanel.Size.X.Offset+20
-    if isEditorHidden then editorToggleBtn.Text="<"; Services.Tweens:Create(infoPanel,tInfo,{Position=UDim2.new(1,offX,0.5,0)}):Play()
-    else editorToggleBtn.Text=">"; Services.Tweens:Create(infoPanel,tInfo,{Position=UDim2.new(1,-20,0.5,0)}):Play(); updatePanel() end
+    local visPos, hidPos = getInfoPanelPositions()
+    if isEditorHidden then
+        editorToggleBtn.Text="<"
+        Services.Tweens:Create(infoPanel,tInfo,{Position=hidPos}):Play()
+    else
+        editorToggleBtn.Text=">"
+        Services.Tweens:Create(infoPanel,tInfo,{Position=visPos}):Play()
+        updatePanel()
+    end
 end)
 
 crosshair=Instance.new("Frame",MainUI); crosshair.Size=UDim2.fromOffset(16,16); crosshair.Position=UDim2.fromScale(0.5,0.5); crosshair.AnchorPoint=Vector2.new(0.5,0.5); crosshair.BackgroundTransparency=1; crosshair.Visible=false
@@ -2835,10 +2863,23 @@ Instance.new("UICorner",utilityBtn).CornerRadius=UDim.new(0,8)
 
 function applyUtilityLayout()
     local barH=toolBar.Size.Y.Offset; local margin=getScreenMargin()
-    if toolbarEdge=="bottom" then utilityBtn.Position=UDim2.new(0.5,0,1,-(barH+(IS_MOBILE and 30 or 40))); utilityBtn.AnchorPoint=Vector2.new(0.5,1)
-    elseif toolbarEdge=="top" then utilityBtn.Position=UDim2.new(0.5,0,0,barH+(IS_MOBILE and 30 or 40)); utilityBtn.AnchorPoint=Vector2.new(0.5,0)
-    elseif toolbarEdge=="left" then utilityBtn.Position=UDim2.new(0,toolBar.Size.X.Offset+20+margin,1,-(margin+gH+12)); utilityBtn.AnchorPoint=Vector2.new(0,1)
-    else utilityBtn.Position=UDim2.new(1,-(toolBar.Size.X.Offset+20+margin),1,-(margin+gH+12)); utilityBtn.AnchorPoint=Vector2.new(1,1) end
+    -- El utilityBtn se posiciona encima del gridFrame (lado izquierdo) para no
+    -- solaparse con los botones centrales del toolbar ni con el gridFrame.
+    -- offset vertical: barH + gH + espacio entre ellos
+    local vGap = IS_MOBILE and 10 or 12
+    if toolbarEdge=="bottom" then
+        utilityBtn.Position=UDim2.new(0, margin, 1, -(barH + gH + vGap + utilityBtn.Size.Y.Offset))
+        utilityBtn.AnchorPoint=Vector2.new(0,1)
+    elseif toolbarEdge=="top" then
+        utilityBtn.Position=UDim2.new(0, margin, 0, barH + gH + vGap)
+        utilityBtn.AnchorPoint=Vector2.new(0,0)
+    elseif toolbarEdge=="left" then
+        utilityBtn.Position=UDim2.new(0,toolBar.Size.X.Offset+20+margin,1,-(margin+gH+12))
+        utilityBtn.AnchorPoint=Vector2.new(0,1)
+    else
+        utilityBtn.Position=UDim2.new(1,-(toolBar.Size.X.Offset+20+margin),1,-(margin+gH+12))
+        utilityBtn.AnchorPoint=Vector2.new(1,1)
+    end
 end
 applyUtilityLayout()
 
@@ -3883,7 +3924,7 @@ cancelTextBtn=Instance.new("TextButton",textConfirmBar); cancelTextBtn.Size=UDim
 cancelTextBtn.MouseButton1Click:Connect(function()
     playUISound(); destroyTextPreview()
     if textPanel and textPanel.Visible and closeTextPanelFn then closeTextPanelFn() end
-    if isEditorHidden then isEditorHidden=false; editorToggleBtn.Text=">"; Services.Tweens:Create(infoPanel,TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Position=UDim2.new(1,-20,0.5,0)}):Play(); updatePanel() end
+    if isEditorHidden then isEditorHidden=false; editorToggleBtn.Text=">"; local _vp,_ = getInfoPanelPositions(); Services.Tweens:Create(infoPanel,TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Position=_vp}):Play(); updatePanel() end
 end)
 
 textPanel=Instance.new("Frame",ModalUI); textPanel.Name="Text3DPanel"; textPanel.AnchorPoint=Vector2.new(0.5,1)
@@ -4010,7 +4051,8 @@ buildTextBtn.MouseButton1Click:Connect(function()
     textCurveRadius=math.clamp(tonumber(curveBox.Text) or 0,0,500)
     if textPanel.Visible then closeTextPanelImpl() end
     togglePanel(false)
-    Services.Tweens:Create(infoPanel,TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Position=UDim2.new(1,infoPanel.Size.X.Offset+20,0.5,0)}):Play()
+    local _,_hidPosText = getInfoPanelPositions()
+    Services.Tweens:Create(infoPanel,TweenInfo.new(0.4,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{Position=_hidPosText}):Play()
     isEditorHidden=true; editorToggleBtn.Text="<"
     clearPreview()
     task.wait(0.25)
