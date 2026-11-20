@@ -224,7 +224,7 @@ local function getArrowColor(face)
         elseif face == Enum.NormalId.Top or face == Enum.NormalId.Bottom then return Color3.new(0, 1, 0)
         else return Color3.new(0, 0, 1) end
     else
-        return Color3.fromRGB(0, 255, 255)
+        return Color3.fromHex("0000FF")
     end
 end
 
@@ -234,8 +234,20 @@ local function getResizeColor(dir)
         elseif math.abs(dir.Y) > 0.5 then return Color3.new(0, 1, 0)
         else return Color3.new(0, 0, 1) end
     else
-        return toolColors.scale
+        if currentMode == "mirrorCopy" then return Color3.fromHex("AA00FF") end
+        return Color3.fromHex("FF8000")
     end
+end
+
+-- Color de la caja (SelectionBox) por herramienta.
+-- Roblox Studio: los colores de siempre (toolColors). Build Mode: Move 0000FF, Resize FF8000, Mirror copy AA00FF.
+function getModeBoxColor(mode)
+    if handleColorPalette == "Build Mode" then
+        if mode == "move" then return Color3.fromHex("0000FF")
+        elseif mode == "scale" then return Color3.fromHex("FF8000")
+        elseif mode == "mirrorCopy" then return Color3.fromHex("AA00FF") end
+    end
+    return toolColors[mode]
 end
 
 local ArrowDragger = {}
@@ -893,6 +905,8 @@ hideHandlesOnClose = false
 showBlockName = false
 outlineThickness = 0.015
 useAdvancedRotate = true
+USE_NEW_ROTATE_DRAGGER = true -- true = handle nuevo (RotateDraggerV2) | false = vuelve al handle antiguo (PAT_RotatorV2)
+rotateDraggerNew = nil
 currentAxis = nil
 startPivot = nil
 initialAngle = 0
@@ -1259,7 +1273,7 @@ function getCirclePoint(axis, angle, radius)
 end
 
 function PAT_RotatorV2:BeginDrag(axis)
-    if not targetPart or not useAdvancedRotate or currentMode~="rotate" or isDragging then return end
+    if not targetPart or not useAdvancedRotate or USE_NEW_ROTATE_DRAGGER or currentMode~="rotate" or isDragging then return end
     lastHandleDownTick = tick()
     saveState(); saveOriginalTransparencies(); setObjectsTransparency(0.3)
     isDragging = true
@@ -1345,7 +1359,7 @@ end
 local function quant(v, step) return math.floor(v / step + 0.5) * step end
 
 function PAT_RotatorV2:Update()
-    local active = (targetPart ~= nil and currentMode == "rotate" and useAdvancedRotate)
+    local active = (targetPart ~= nil and currentMode == "rotate" and useAdvancedRotate and not USE_NEW_ROTATE_DRAGGER)
     if isBarHidden and hideHandlesOnClose then active = false end
     if not active and not self.was then return end
     self.was = active
@@ -1426,7 +1440,7 @@ function PAT_RotatorV2:Update()
 end
 
 function PAT_RotatorV2:Drag()
-    if not (isDragging and currentMode=="rotate" and useAdvancedRotate and startPivot and currentAxis) then return end
+    if not (isDragging and currentMode=="rotate" and useAdvancedRotate and not USE_NEW_ROTATE_DRAGGER and startPivot and currentAxis) then return end
     local mousePos=Services.UserInput:GetMouseLocation()
     local depth=(startPivot.Position-cam.CFrame.Position).Magnitude
     local ray=cam:ViewportPointToRay(mousePos.X,mousePos.Y)
@@ -1457,6 +1471,365 @@ function finishCustomRotate()
     originalCFrames={}; proxyDirty=true
     updateProxy()
     PAT_RotatorV2:Update()
+end
+
+-- =====================================================================
+-- ROTATE DRAGGER NUEVO (port de RotateDragger, misma base BaseAdornment)
+-- Para volver al handle antiguo (PAT_RotatorV2): USE_NEW_ROTATE_DRAGGER = false
+-- =====================================================================
+do
+    local RD = {}
+    RD.__index = RD
+    setmetatable(RD, BaseAdornment)
+
+    local RD_TWO_PI = 6.283185307179586
+    local RD_COLORS = { X = Color3.new(1, 0, 0), Y = Color3.new(0, 1, 0), Z = Color3.new(0, 0, 1) }
+    local RD_FACE_NAME = { X1 = "Right", ["X-1"] = "Left", Y1 = "Up", ["Y-1"] = "Down", Z1 = "Back", ["Z-1"] = "Front" }
+    local RD_DIR_OF = {
+        Front = Vector3.new(0, -1, 0), Back = Vector3.new(0, 1, 0),
+        Left = Vector3.new(0, 0, -1), Right = Vector3.new(0, 0, 1),
+        Up = Vector3.new(1, 0, 0), Down = Vector3.new(-1, 0, 0),
+    }
+    local RD_PLANE_VEC = { X = "RightVector", Y = "UpVector", Z = "-LookVector" }
+    local RD_STATE = {
+        None     = { Scale = 0.4, Transparency = 0.5 },
+        Hovering = { Scale = 0.6, Transparency = 0.4 },
+        Dragging = { Scale = 0.5, Transparency = 0.2 },
+    }
+
+    local function RD_applyScales(kind)
+        local s
+        if kind == Enum.UserInputType.Touch then s = { 0.6, 0.8, 0.7 }
+        elseif kind == Enum.UserInputType.MouseMovement then s = { 0.4, 0.6, 0.5 }
+        elseif kind == Enum.UserInputType.Gamepad1 then s = { 1.5, 1.7, 1.6 }
+        else return end
+        RD_STATE.None.Scale = s[1]
+        RD_STATE.Hovering.Scale = s[2]
+        RD_STATE.Dragging.Scale = s[3]
+    end
+    RD_applyScales(Services.UserInput:GetLastInputType())
+    track(Services.UserInput.LastInputTypeChanged:Connect(RD_applyScales))
+
+    local function RD_getAdorneeInfo(adornee)
+        if adornee:IsA("BasePart") then return adornee.CFrame, adornee.Size end
+        if adornee:IsA("Model") then return adornee:GetBoundingBox() end
+        error("Adornee must be a BasePart or Model")
+    end
+
+    local function RD_intersectRayWithAxis(p6, p7, p8)
+        local v9 = p8.Origin
+        local v10 = p8.Direction.Unit
+        local v11 = p7:Cross((v9 - p6).Unit)
+        if v11:Dot(v11) < 0.0001 then return false end
+        local v12 = p7:Cross(v11).Unit
+        if v10:Dot(v12) < 0.0001 then return false end
+        return true, (v9 + (p6 - v9):Dot(v12) / v10:Dot(v12) * v10 - p6):Dot(p7)
+    end
+
+    local function RD_planeNormal(sphere)
+        local vecName = RD_PLANE_VEC[sphere:GetAttribute("Axis")]
+        local sign = 1
+        if vecName:sub(1, 1) == "-" then
+            sign = -1
+            vecName = vecName:sub(2)
+        end
+        return sphere:GetAttribute("Origin")[vecName] * sign
+    end
+
+    local function RD_closestPointOnPlane(sphere, p)
+        local planeOrigin = sphere:GetAttribute("Origin").Position
+        local n = RD_planeNormal(sphere)
+        return p - n:Dot(p - planeOrigin) * n
+    end
+
+    local function RD_pointOnPlane(sphere, rayOrigin, rayDir)
+        local planeOrigin = sphere:GetAttribute("Origin").Position
+        local n = RD_planeNormal(sphere)
+        local denom = n:Dot(rayDir)
+        local hit = rayOrigin + rayDir * (n:Dot(planeOrigin - rayOrigin) / denom)
+        if n:Dot(rayOrigin - planeOrigin) < 0 then denom = -denom end
+        if denom >= 0 then
+            return RD_closestPointOnPlane(sphere, rayOrigin + rayDir * 750)
+        end
+        return hit
+    end
+
+    local function RD_mousePointOnPlane(sphere)
+        local m = Services.UserInput:GetMouseLocation()
+        local ray = workspace.CurrentCamera:ViewportPointToRay(m.X, m.Y, 0)
+        return RD_pointOnPlane(sphere, ray.Origin, ray.Direction)
+    end
+
+    local function RD_rawAngle(sphere, point)
+        local initPoint = sphere:GetAttribute("InitPoint")
+        local p = point or RD_mousePointOnPlane(sphere)
+        local center = sphere:GetAttribute("Origin").Position
+        local n = RD_planeNormal(sphere)
+        local v49 = (initPoint - center).Unit
+        local v50 = (p - center).Unit
+        local v52 = math.acos(v49:Dot(v50))
+        if v50:Dot(n:Cross(v49)) >= 0 then return v52 end
+        return RD_TWO_PI - v52
+    end
+
+    local function RD_deltaAngle(from, to)
+        local a = (from - to) % RD_TWO_PI
+        local b = (to - from) % RD_TWO_PI
+        if a <= b then b = -a end
+        return b
+    end
+
+    local function RD_accumulatedAngle(sphere, point)
+        local raw = RD_rawAngle(sphere, point)
+        local delta = RD_deltaAngle(sphere:GetAttribute("PrevAngle"), raw)
+        if delta ~= delta then delta = 0 end
+        sphere:SetAttribute("Angle", sphere:GetAttribute("Angle") + delta)
+        sphere:SetAttribute("PrevAngle", raw)
+        return sphere:GetAttribute("Angle")
+    end
+
+    function RD:_stateOf(h)
+        local st = self._HandleState[h]
+        if st.mouseDown then return RD_STATE.Dragging end
+        if st.mouseHovering then return RD_STATE.Hovering end
+        return RD_STATE.None
+    end
+
+    function RD:_applyState(h)
+        local st = self:_stateOf(h)
+        h.Transparency = st.Transparency
+        h:SetAttribute("Scale", h:HasTag("Sphere") and st.Scale or 4.5)
+        local axisName = h:GetAttribute("Axis")
+        local ring = (axisName and h.Parent) and h.Parent:FindFirstChild(axisName) or nil
+        if ring then ring.Transparency = st.Transparency end
+    end
+
+    function RD.new(faces)
+        local self = BaseAdornment.new()
+        setmetatable(self, RD)
+
+        local evDown = Instance.new("BindableEvent")
+        local evDrag = Instance.new("BindableEvent")
+        local evUp = Instance.new("BindableEvent")
+        self._Bindables = { evDown, evDrag, evUp }
+        self.MouseButton1Down = evDown.Event
+        self.MouseDrag = evDrag.Event
+        self.MouseButton1Up = evUp.Event
+        self.IsDragging = false
+        self.Visible = true
+        self.Faces = faces
+        self._HandleState = {}
+        self._Connections = {}
+        self._DragConn = nil
+
+        for _, axis in ipairs(faces) do
+            local axisName = axis.Name
+
+            local ring = Instance.new("CylinderHandleAdornment")
+            ring.Parent = self._Instance
+            ring.ZIndex = 4
+            ring.AlwaysOnTop = true
+            ring.Color3 = RD_COLORS[axisName]
+            ring.Transparency = 0.5
+            ring.Name = axisName
+            self._HandleState[ring] = { mouseHovering = false, mouseDown = false }
+            ring:SetAttribute("Direction", Vector3.FromAxis(axis))
+            ring:SetAttribute("Face", RD_FACE_NAME[axisName .. "1"])
+            ring:SetAttribute("Scale", 4.5)
+            table.insert(self._Handles, ring)
+
+            for sign = -1, 1, 2 do
+                local key = axisName .. sign
+                local dir = RD_DIR_OF[RD_FACE_NAME[key]]
+
+                local sphere = Instance.new("SphereHandleAdornment")
+                sphere.Parent = self._Instance
+                sphere.ZIndex = 5
+                sphere.AlwaysOnTop = true
+                sphere.Color3 = RD_COLORS[axisName]
+                self._HandleState[sphere] = { mouseHovering = false, mouseDown = false }
+                sphere:SetAttribute("Direction", dir)
+                sphere:SetAttribute("Face", RD_FACE_NAME[key])
+                sphere:SetAttribute("Scale", RD_STATE.None.Scale)
+                sphere:SetAttribute("Axis", axisName)
+                sphere:AddTag("Sphere")
+                sphere.Transparency = RD_STATE.None.Transparency
+                sphere:SetAttribute("Scale", RD_STATE.None.Scale)
+
+                table.insert(self._Handles, sphere)
+
+                sphere.MouseEnter:Connect(function()
+                    if self._Adornee then
+                        self._HandleState[sphere].mouseHovering = true
+                        self:_applyState(sphere)
+                    end
+                end)
+
+                sphere.MouseLeave:Connect(function()
+                    if self._Adornee then
+                        self._HandleState[sphere].mouseHovering = false
+                        self:_applyState(sphere)
+                    end
+                end)
+
+                sphere.MouseButton1Down:Connect(function()
+                    if not self._Adornee then return end
+                    self._HandleState[sphere].mouseDown = true
+                    self:_applyState(sphere)
+                    evDown:Fire(dir)
+                    self.IsDragging = true
+                    if not self._DragConn then
+                        local origin = RD_getAdorneeInfo(self._Adornee)
+                        sphere:SetAttribute("Origin", origin)
+                        sphere:SetAttribute("PrevAngle", 0)
+                        sphere:SetAttribute("Angle", 0)
+                        sphere:SetAttribute("InitPoint", RD_mousePointOnPlane(sphere))
+                        self._DragConn = Services.UserInput.InputChanged:Connect(function(input)
+                            local t = input.UserInputType
+                            if t == Enum.UserInputType.MouseMovement or t == Enum.UserInputType.Touch
+                                or input.KeyCode == Enum.KeyCode.Thumbstick1 or input.KeyCode == Enum.KeyCode.Thumbstick2 then
+                                local worldDir = origin.Rotation:VectorToWorldSpace(dir)
+                                local m = Services.UserInput:GetMouseLocation()
+                                local r = workspace.CurrentCamera:ViewportPointToRay(m.X, m.Y)
+                                local hit = RD_intersectRayWithAxis(origin.Position, worldDir, Ray.new(r.Origin, r.Direction * 10000))
+                                if hit then
+                                    local raw = RD_accumulatedAngle(sphere, RD_mousePointOnPlane(sphere))
+                                    local clamped = math.sign(raw) * (math.abs(raw) % RD_TWO_PI)
+                                    sphere:SetAttribute("Angle", clamped)
+                                    evDrag:Fire(axis, clamped)
+                                end
+                            end
+                        end)
+                    end
+                end)
+            end
+        end
+
+        table.insert(self._Connections, track(Services.UserInput.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+                or input.KeyCode == Enum.KeyCode.ButtonR2 then
+                self.IsDragging = false
+                for h, st in pairs(self._HandleState) do
+                    if st.mouseDown then
+                        st.mouseDown = false
+                        if h:HasTag("Sphere") then self:_applyState(h) end
+                        evUp:Fire(h:GetAttribute("Direction"))
+                    end
+                end
+                if self._DragConn then
+                    self._DragConn:Disconnect()
+                    self._DragConn = nil
+                end
+            end
+        end)))
+
+        table.insert(self._Connections, track(Services.Run.RenderStepped:Connect(function()
+            if not self._Adornee then
+                for _, h in ipairs(self._Handles) do h.Adornee = nil end
+                return
+            end
+            local cf, size = RD_getAdorneeInfo(self._Adornee)
+            local radius = math.max(size.X, size.Y, size.Z)
+            local cam = workspace.CurrentCamera
+            local sinFov = math.sin(math.rad(cam.FieldOfView))
+            for _, h in ipairs(self._Handles) do
+                h.Visible = true
+                h.Adornee = workspace.Terrain
+                local dir = h:GetAttribute("Direction")
+                local dist = (cam.CFrame.Position - h.CFrame.Position).Magnitude
+                local k = sinFov * dist * 0.05
+                if h:HasTag("Sphere") then
+                    h.CFrame = cf * CFrame.new(dir * radius + dir * k)
+                    h.Radius = h:GetAttribute("Scale") * k
+                    local st = self:_stateOf(h)
+                    h.Transparency = st.Transparency
+                    h:SetAttribute("Scale", st.Scale)
+                else
+                    local rot = dir * 90
+                    local thick = 0.1 * k
+                    h.CFrame = cf * CFrame.Angles(math.rad(rot.Y), math.rad(rot.X), math.rad(rot.Z))
+                    h.Radius = radius
+                    h.InnerRadius = h.Radius - thick
+                    h.Height = thick
+                end
+            end
+        end)))
+
+        return self
+    end
+
+    function RD:SetVisible(v)
+        for _, h in pairs(self._Handles) do h.Visible = v end
+        self.Visible = v
+    end
+
+    function RD:SetAdornee(p)
+        local ok = (p == nil) or (typeof(p) == "Instance" and p:IsA("PVInstance"))
+        assert(ok, "Adornee must be a PVInstance or nil")
+        self._Adornee = p
+        self:_AdorneeChanged()
+    end
+
+    function RD:Destroy()
+        BaseAdornment.Destroy(self)
+        for _, c in ipairs(self._Connections) do pcall(function() c:Disconnect() end) end
+        if self._DragConn then
+            pcall(function() self._DragConn:Disconnect() end)
+            self._DragConn = nil
+        end
+        for _, b in ipairs(self._Bindables) do pcall(function() b:Destroy() end) end
+    end
+
+    RotateDraggerV2 = RD
+end
+
+do
+    local function onRotateDraggerDown()
+        if not targetPart or not USE_NEW_ROTATE_DRAGGER or currentMode~="rotate" or isDragging then return end
+        lastHandleDownTick = tick()
+        saveState(); saveOriginalTransparencies(); setObjectsTransparency(0.3)
+        isDragging = true
+        currentAngle = 0
+        lockCamera()
+        updateProxy()
+        startPivot = proxyPart.CFrame
+        originalCFrames = {}
+        for _, obj in ipairs(selectedObjects) do originalCFrames[obj] = obj:GetPivot() end
+    end
+
+    local function onRotateDraggerDrag(axis, angle)
+        if not isDragging or not startPivot then return end
+        local s = math.rad(tonumber(snapInput.Text) or 15)
+        if s <= 0 then s = math.rad(1) end
+        local snapped = math.floor(angle / s + 0.5) * s
+        currentAxis = axis.Name
+        currentAngle = snapped
+        local rotDelta = CFrame.fromAxisAngle(Vector3.FromAxis(axis), snapped)
+        for _, obj in ipairs(selectedObjects) do
+            local originalCF = originalCFrames[obj]
+            if originalCF then
+                local relative = startPivot:Inverse() * originalCF
+                obj:PivotTo(startPivot * rotDelta * relative)
+                syncFilter(obj)
+            end
+        end
+        proxyDirty = true
+    end
+
+    local function onRotateDraggerUp()
+        finishCustomRotate()
+    end
+
+    function getRotateDraggerNew()
+        if not rotateDraggerNew then
+            rotateDraggerNew = RotateDraggerV2.new(Enum.Axis:GetEnumItems())
+            rotateDraggerNew:SetParent(VisualFolder)
+            rotateDraggerNew.MouseButton1Down:Connect(onRotateDraggerDown)
+            rotateDraggerNew.MouseDrag:Connect(onRotateDraggerDrag)
+            rotateDraggerNew.MouseButton1Up:Connect(onRotateDraggerUp)
+        end
+        return rotateDraggerNew
+    end
 end
 
 infoPanel = Instance.new("Frame", MainUI)
@@ -3312,6 +3685,7 @@ handles={m=nil,r=nil,s=nil}
 visualDraggers = { move = nil }
 
 function clearH(full)
+    if rotateDraggerNew then rotateDraggerNew:SetAdornee(nil) end
     for k,v in pairs(handles) do if v then v:Destroy(); handles[k]=nil end end
     if visualDraggers.move then visualDraggers.move:SetAdornee(nil) end
     if full then
@@ -3355,7 +3729,7 @@ function activateMove()
     if not targetPart then return end
     clearH(false); currentMode="move"; snapInput.Text=snapMemory.move; utilityBtn.Visible=not isBarHidden; updateGridUI(true)
     utilityBtn.Text=useGlobalSpace and "mode: global" or "mode: local"
-    outline.Color3=toolColors.move
+    outline.Color3=getModeBoxColor("move")
 
     if not visualDraggers.move then
         visualDraggers.move = ArrowDragger.new()
@@ -3397,7 +3771,12 @@ function activateRotate()
     clearH(false); currentMode="rotate"; snapInput.Text=snapMemory.rotate; updateGridUI(true)
     outline.Color3=toolColors.rotate
     rotateProxy.Size=proxyPart.Size; rotateProxy.CFrame=proxyPart.CFrame
-    if useAdvancedRotate then currentAxis=nil; initialAngle=0; currentAngle=0; PAT_RotatorV2:Update(); return end
+    if useAdvancedRotate then
+        currentAxis=nil; initialAngle=0; currentAngle=0
+        if USE_NEW_ROTATE_DRAGGER then getRotateDraggerNew():SetAdornee(rotateProxy)
+        else PAT_RotatorV2:Update() end
+        return
+    end
     local h=Instance.new("ArcHandles",HandlesParent); h.Adornee=rotateProxy; h.Color3=toolColors.rotate
     currentAxis=nil; initialAngle=0; currentAngle=0
     applyFocus(h,true,function() end); handles.r=h
@@ -3418,7 +3797,7 @@ end
 
 function activateScale()
     if not targetPart then return end
-    clearH(false); currentMode="scale"; outline.Color3=toolColors.scale
+    clearH(false); currentMode="scale"; outline.Color3=getModeBoxColor("scale")
     if #selectedObjects>1 then local first=selectedObjects[1]; selectedObjects={first}; targetPart=first; updateProxy() end
     snapInput.Text=snapMemory.scale; utilityBtn.Visible=not isBarHidden
     utilityBtn.Text=isMirrorOn and "mirror: on" or "mirror: off"; updateGridUI(false)
@@ -3832,7 +4211,7 @@ function createTextPreview(textRaw,pixelSize,pixelGap,depth,keepPivot)
     textPreviewBounds.Size=s; textPreviewBounds.CFrame=c; textPreviewBounds.Transparency=1
     textPreviewBounds.Anchored=true; textPreviewBounds.CanCollide=false; textPreviewBounds.CanQuery=false
     textPreviewBounds.Parent=textPreviewModel
-    t3dMoveHandles=Instance.new("Handles",HandlesParent); t3dMoveHandles.Adornee=textPreviewBounds; t3dMoveHandles.Style=Enum.HandlesStyle.Movement; t3dMoveHandles.Color3=toolColors.move
+    t3dMoveHandles=Instance.new("Handles",HandlesParent); t3dMoveHandles.Adornee=textPreviewBounds; t3dMoveHandles.Style=Enum.HandlesStyle.Movement; t3dMoveHandles.Color3=getModeBoxColor("move")
     t3dMoveHandles.MouseButton1Down:Connect(function() lastMoveDist=0 end)
     t3dMoveHandles.MouseDrag:Connect(function(face,dist)
         local grid=0.5; local cur=math.floor(dist/grid+0.5)*grid; local delta=cur-lastMoveDist
@@ -4153,13 +4532,17 @@ track(Services.Run.RenderStepped:Connect(function()
         rotateProxy.Size=proxyPart.Size; rotateProxy.CFrame=proxyPart.CFrame
     end
     if handles.r then handles.r.Adornee=(currentMode=="rotate" and show) and rotateProxy or nil end
+    if rotateDraggerNew then
+        local wantAdornee=(USE_NEW_ROTATE_DRAGGER and useAdvancedRotate and currentMode=="rotate" and show) and rotateProxy or nil
+        if rotateDraggerNew:GetAdornee()~=wantAdornee then rotateDraggerNew:SetAdornee(wantAdornee) end
+    end
     if currentMode~="select" then
         if showOutline then outline.Adornee=(show and currentMode~="None") and proxyPart or nil
         else outline.Adornee=nil end
-        if currentMode=="move" then outline.Color3=toolColors.move
+        if currentMode=="move" then outline.Color3=getModeBoxColor("move")
         elseif currentMode=="rotate" then outline.Color3=toolColors.rotate
-        elseif currentMode=="scale" then outline.Color3=toolColors.scale
-        elseif currentMode=="mirrorCopy" then outline.Color3=toolColors.mirrorCopy
+        elseif currentMode=="scale" then outline.Color3=getModeBoxColor("scale")
+        elseif currentMode=="mirrorCopy" then outline.Color3=getModeBoxColor("mirrorCopy")
         else outline.Color3=toolColors.selectionBox end
     end
     PAT_RotatorV2:Drag(); PAT_RotatorV2:Update()
